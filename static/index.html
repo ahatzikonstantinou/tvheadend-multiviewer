@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="UTF-8">
+  <title>TV Mosaic Settings</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    label { display: block; margin-top: 10px; }
+    .grid-cell { border: 1px solid #ccc; padding: 5px; margin: 2px; }
+    .grid-row { display: flex; }
+  </style>
+</head>
+<body>
+  <h1>TV Mosaic Settings</h1>
+
+  <div>
+    <label>
+      TVHeadend URL:
+      <input type="text" id="tvh-url" size="40" placeholder="http://192.168.3.104:9981">
+    </label>
+
+    <button id="btn-test">Test connection</button>
+    <span id="test-result"></span>
+
+    <label>
+      Grid rows:
+      <input type="number" id="grid-rows" min="1" max="10" value="3">
+    </label>
+
+    <label>
+      Grid cols:
+      <input type="number" id="grid-cols" min="1" max="10" value="4">
+    </label>
+
+    <button id="btn-load-channels">Load channels</button>
+    <span id="channels-status"></span>
+  </div>
+
+  <h2>Grid mapping</h2>
+  <div id="grid-container"></div>
+
+  <button id="btn-save">Save settings</button>
+  <span id="save-status"></span>
+
+  <script>
+    let channels = [];
+    let cells = []; // {row, col, channel_uuid}
+
+    async function loadSettings() {
+      const res = await fetch('/api/settings');
+      const cfg = await res.json();
+      document.getElementById('tvh-url').value = cfg.tvheadend_url || '';
+      document.getElementById('grid-rows').value = cfg.grid_rows || 3;
+      document.getElementById('grid-cols').value = cfg.grid_cols || 4;
+      cells = cfg.cells || [];
+      renderGrid();
+    }
+
+    function renderGrid() {
+      const rows = parseInt(document.getElementById('grid-rows').value, 10);
+      const cols = parseInt(document.getElementById('grid-cols').value, 10);
+      const container = document.getElementById('grid-container');
+      container.innerHTML = '';
+
+      for (let r = 0; r < rows; r++) {
+        const rowDiv = document.createElement('div');
+        rowDiv.className = 'grid-row';
+        for (let c = 0; c < cols; c++) {
+          const cellDiv = document.createElement('div');
+          cellDiv.className = 'grid-cell';
+
+          const label = document.createElement('div');
+          label.textContent = `Cell ${r},${c}`;
+          cellDiv.appendChild(label);
+
+          const select = document.createElement('select');
+          select.dataset.row = r;
+          select.dataset.col = c;
+
+          const optNone = document.createElement('option');
+          optNone.value = '';
+          optNone.textContent = '-- none --';
+          select.appendChild(optNone);
+
+          channels.forEach(ch => {
+            const opt = document.createElement('option');
+            opt.value = ch.uuid;
+            opt.textContent = `${ch.number || ''} ${ch.name}`;
+            select.appendChild(opt);
+          });
+
+          const existing = cells.find(
+            ce => ce.row === r && ce.col === c
+          );
+          if (existing && existing.channel_uuid) {
+            select.value = existing.channel_uuid;
+          }
+
+          select.addEventListener('change', () => {
+            const row = parseInt(select.dataset.row, 10);
+            const col = parseInt(select.dataset.col, 10);
+            const uuid = select.value || null;
+            const idx = cells.findIndex(ce => ce.row === row && ce.col === col);
+            if (idx >= 0) {
+              cells[idx].channel_uuid = uuid;
+            } else {
+              cells.push({ row, col, channel_uuid: uuid });
+            }
+          });
+
+          cellDiv.appendChild(select);
+          rowDiv.appendChild(cellDiv);
+        }
+        container.appendChild(rowDiv);
+      }
+    }
+
+    document.getElementById('grid-rows').addEventListener('change', renderGrid);
+    document.getElementById('grid-cols').addEventListener('change', renderGrid);
+
+    document.getElementById('btn-test').addEventListener('click', async () => {
+      const url = document.getElementById('tvh-url').value;
+      const resSpan = document.getElementById('test-result');
+      resSpan.textContent = 'Testing...';
+      const res = await fetch('/api/test_connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tvheadend_url: url })
+      });
+      const j = await res.json();
+      if (j.ok) {
+        resSpan.textContent = 'OK';
+      } else {
+        resSpan.textContent = 'Error: ' + (j.error || 'unknown');
+      }
+    });
+
+    document.getElementById('btn-load-channels').addEventListener('click', async () => {
+      const url = document.getElementById('tvh-url').value;
+      const status = document.getElementById('channels-status');
+      status.textContent = 'Loading...';
+      const res = await fetch('/api/channels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tvheadend_url: url })
+      });
+      const j = await res.json();
+      if (j.ok) {
+        channels = j.channels;
+        status.textContent = `Loaded ${channels.length} channels`;
+        renderGrid();
+      } else {
+        status.textContent = 'Error: ' + (j.error || 'unknown');
+      }
+    });
+
+    document.getElementById('btn-save').addEventListener('click', async () => {
+      const status = document.getElementById('save-status');
+      status.textContent = 'Saving...';
+      const body = {
+        tvheadend_url: document.getElementById('tvh-url').value,
+        grid_rows: parseInt(document.getElementById('grid-rows').value, 10),
+        grid_cols: parseInt(document.getElementById('grid-cols').value, 10),
+        cells: cells
+      };
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const j = await res.json();
+      if (j.status === 'ok') {
+        status.textContent = 'Saved';
+      } else {
+        status.textContent = 'Error saving';
+      }
+    });
+
+    loadSettings();
+  </script>
+</body>
+</html>

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>TV Mosaic Grid (Video)</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; background: #111; color: #eee; }
+    .grid-row { display: flex; }
+    .cell {
+      border: 1px solid #333;
+      margin: 3px;
+      background: #000;
+      width: 320px;
+      height: 180px;
+      position: relative;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      background: #000;
+      object-fit: cover;
+    }
+    .label {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(0,0,0,0.6);
+      color: #fff;
+      padding: 3px 6px;
+      font-size: 12px;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body>
+  <h1>TV Mosaic Video Grid</h1>
+  <div id="grid"></div>
+
+  <script>
+    async function loadSettings() {
+      const res = await fetch('/api/settings');
+      return await res.json();
+    }
+
+    async function loadChannels(tvhUrl) {
+      const res = await fetch('/api/channels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tvheadend_url: tvhUrl })
+      });
+      const j = await res.json();
+      if (!j.ok) return [];
+      return j.channels;
+    }
+
+    function findChannel(channels, uuid) {
+      return channels.find(c => c.uuid === uuid);
+    }
+
+    function buildStreamURL(tvhUrl, ch) {
+      // HLS profile (if enabled in TVH)
+      return tvhUrl.replace(/\/$/, '') + '/stream/channel/' + ch.uuid + '?profile=matroska';
+    }
+
+    // obsolete
+    // function attachVideo(videoElement, streamUrl) {
+    //   if (Hls.isSupported()) {
+    //     const hls = new Hls({
+    //       maxBufferLength: 5,
+    //       liveSyncDuration: 2
+    //     });
+    //     hls.loadSource(streamUrl);
+    //     hls.attachMedia(videoElement);
+    //   } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+    //     videoElement.src = streamUrl;
+    //   } else {
+    //     videoElement.src = streamUrl; // raw TS fallback
+    //   }
+    // }
+
+    async function renderGrid() {
+      const cfg = await loadSettings();
+      const channels = await loadChannels(cfg.tvheadend_url);
+
+      const container = document.getElementById('grid');
+      container.innerHTML = '';
+
+      for (let r = 0; r < cfg.grid_rows; r++) {
+        const rowDiv = document.createElement('div');
+        rowDiv.className = 'grid-row';
+
+        for (let c = 0; c < cfg.grid_cols; c++) {
+          const cellDiv = document.createElement('div');
+          cellDiv.className = 'cell';
+
+          const cellCfg = cfg.cells.find(x => x.row === r && x.col === c);
+
+          if (cellCfg && cellCfg.channel_uuid) {
+            const ch = findChannel(channels, cellCfg.channel_uuid);
+
+            const video = document.createElement('video');
+            video.autoplay = true;
+            video.muted = true;
+            video.playsInline = true;
+
+            const streamUrl = buildStreamURL(cfg.tvheadend_url, ch);
+            video.src = streamUrl;// attachVideo(video, streamUrl);
+
+            cellDiv.appendChild(video);
+
+            const label = document.createElement('div');
+            label.className = 'label';
+            label.textContent = (ch.number ? ch.number + ' ' : '') + ch.name;
+            cellDiv.appendChild(label);
+          } else {
+            const label = document.createElement('div');
+            label.className = 'label';
+            label.textContent = 'Empty';
+            cellDiv.appendChild(label);
+          }
+
+          rowDiv.appendChild(cellDiv);
+        }
+
+        container.appendChild(rowDiv);
+      }
+    }
+
+    renderGrid();
+  </script>
+</body>
+</html>

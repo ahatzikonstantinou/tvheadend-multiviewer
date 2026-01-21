@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>TV Mosaic Video Grid</title>
+  <style>
+    :root {
+      --grid-cols: 4; /* default, will be overridden by JS */
+    }
+
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      background: #111;
+      color: #eee;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      touch-action: manipulation; 
+    }
+
+    header {
+      padding: 8px 12px;
+      background: #222;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    header.hidden-in-fullscreen {
+      display: none;
+    }
+
+    /* fullscreen tweeks*/
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+
+    /* Normal layout */ 
+    #fullscreen-wrapper { 
+      position: relative; z-index: 1; 
+    }
+
+    :fullscreen #max-container,
+    :-webkit-full-screen #max-container {
+      height: 100vh;
+      width: 100vw;
+      display: flex;
+      flex-direction: column;
+    }
+
+    :fullscreen #maxed-slot .cell,
+    :-webkit-full-screen #maxed-slot .cell {
+      height: 100%;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    :fullscreen #maxed-slot video,
+    :-webkit-full-screen #maxed-slot video {
+      flex: 1 1 auto;
+      width: 100%;
+      height: auto;
+    }
+
+    :fullscreen .infobar,
+    :-webkit-full-screen .infobar {
+      flex: 0 0 auto;
+    }
+
+    :fullscreen #fullscreen-wrapper,
+    :-webkit-full-screen #fullscreen-wrapper {
+      height: 100vh;
+      overflow: hidden; /* prevent page scroll */
+      display: flex;
+      flex-direction: column;
+    }
+
+    :fullscreen #small-row-container,
+    :-webkit-full-screen #small-row-container {
+      flex: 0 0 auto;
+      max-height: 40vh; /* adjust as needed */
+      overflow-y: auto; /* internal scrolling */
+    }
+    /*end of fullscreen tweeks*/
+
+    /* immersive mode for smartphones */
+    body.immersive-mode {
+      overflow: hidden;
+      background: black;
+    }
+
+    /* Hide header in immersive mode */
+    body.immersive-mode header {
+      display: none;
+    }
+
+    /* Hide the grid in immersive mode (we only want max-container + small-row) */
+    body.immersive-mode #grid {
+      display: none;
+    }
+
+    /* Make fullscreen-wrapper fill the viewport and sit on top */
+    body.immersive-mode #fullscreen-wrapper {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      background: black;
+      z-index: 9999;
+    }
+
+    /* Max-container fills most of the screen */
+    body.immersive-mode #max-container {
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Maxed cell fills available space */
+    body.immersive-mode #maxed-slot .cell {
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Video stretches, infobar stays visible */
+    body.immersive-mode #maxed-slot video {
+      flex: 1 1 auto;
+      width: 100%;
+      height: auto;
+    }
+
+    body.immersive-mode .infobar {
+      flex: 0 0 auto;
+    }
+
+    /* Small-row scrolls internally, page itself does NOT scroll */
+    body.immersive-mode #small-row-container {
+      flex: 0 0 auto;
+      max-height: 40vh;      /* tweak as you like */
+      overflow-y: auto;
+    }
+
+    /* end of immersive mode for smartphones */
+    
+    header span {
+      font-size: 14px;
+    }
+
+    #volumeSlider {
+      width: 200px;
+    }
+
+    .fullscreen-btn { 
+      margin-left: auto; /* push to the right */ 
+      font-size: 20px; 
+      padding: 4px 10px; 
+      background: #333; 
+      color: white; 
+      border: none; 
+      border-radius: 4px; 
+    } 
+    
+    .fullscreen-btn:active { 
+      background: #555; 
+    }
+
+    /*#grid {
+        display: grid;
+        grid-template-columns: repeat(var(--grid-cols), 1fr);
+        grid-auto-rows: auto;
+        align-items: start;
+    }
+
+    .cell {
+      display: flex;
+      flex-direction: column;
+      background: #000;
+      border: 1px solid #333;
+      min-width: 0;
+    }*/
+
+    /* for flexibe grid*/
+    #grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(clamp(250px, 32vw, 1200px), 1fr));
+      gap: 6px;
+      /* width: 100%; */
+      /* height: 100%; */
+      padding: 6px;
+      box-sizing: border-box;
+      align-content: start;
+      flex: 1 1 auto;
+    }
+
+    .cell {
+      position: relative;
+      width: 100%;
+      background: #000;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      touch-action: manipulation; /* or none, if you don’t need native gestures */
+    }
+
+    .cell video {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover; /* γεμίζει το 16:9 container */
+    }
+
+    .video-wrapper {
+      position: relative;
+      width: 100%;
+      /* 16:9 aspect ratio */
+      aspect-ratio: 16 / 9;
+      background: #000;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    video {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #000;
+      z-index: 1;
+    }
+
+    .video-stalled {
+      border: 3px solid red !important;
+    }
+
+    .info-bar {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 6px;
+      background: #222;
+      font-size: 12px;
+      box-sizing: border-box;
+    }
+
+    .channel-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      margin-right: 8px;
+    }
+
+    .mute-btn {
+      padding: 2px 8px;
+      font-size: 11px;
+      cursor: pointer;
+      border: 1px solid #555;
+      background: #333;
+      color: #eee;
+      border-radius: 3px;
+    }
+
+    .mute-btn.active {
+      background: #e91e63;
+      border-color: #ff80ab;
+    }
+
+    .empty-cell {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      color: #aaa;
+    }
+
+    .restart-btn {
+      background: transparent;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+      padding: 4px;
+      opacity: 0.7;
+    }
+
+    .restart-btn:hover {
+      opacity: 1;
+    }
+
+    /* Container that holds the maxed video + the row of small videos */
+    #max-container {
+      display: none;
+      flex-direction: column;
+      width: 100%;
+      gap: 6px;
+    }
+
+    /* Maxed video wrapper */
+    .maxed-video {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Row of small videos */
+    #small-row {
+      display: flex;
+      flex-wrap: wrap;              /* allow wrapping when needed */
+      gap: 6px;
+      width: 100%;
+      overflow: hidden;             /* no scrollbars */
+    }
+
+    #small-row .cell {
+      flex: 1 1 clamp(140px, 18vw, 440px);
+      /* 140px  → never too tiny
+        18vw   → ideal size relative to viewport
+        440px  → as large as it can get*/
+      position: relative;
+      max-width: 440px;             /* ensures nice wrapping */
+    }
+
+
+    /* Hide grid when maxed mode is active */
+    .grid-hidden {
+      display: none !important;
+    }
+
+
+  </style>
+</head>
+<body>
+  <header>
+    <span>Global volume:</span>
+    <input id="volumeSlider" type="range" min="0" max="1" step="0.01" value="0.0">
+    <span id="volumeValue">0%</span>
+
+    <button id="fullscreenBtn" class="fullscreen-btn">⛶</button>
+  </header>
+
+  <!-- <audio id="audioPlayer" autoplay></audio> -->
+
+  <div id="fullscreen-wrapper">
+    <div id="max-container">
+      <div id="maxed-slot"></div>
+      <div id="small-row-container">
+        <div id="small-row"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="grid"></div>
+
+
+  <script>
+    let allVideos = [];
+    let allMuteButtons = [];
+    let wasMaxedVideoUnmuted = false;
+
+    // this function is ncessary for smartphones, because a double click
+    // on a smartphone browser is a small zoom in and never reaches the dom
+    function addDoubleTapListener(element, callback) {
+      let lastTouchTime = 0;
+
+      // Mobile: double‑tap via touchend
+      element.addEventListener('touchend', (e) => {
+        const now = Date.now();
+        const delta = now - lastTouchTime;
+
+        if (delta > 0 && delta < 300) {
+          e.preventDefault();
+          callback(e);
+          lastTouchTime = 0; // reset
+        } else {
+          lastTouchTime = now;
+        }
+      }, { passive: false });
+
+      // Desktop: normal dblclick
+      element.addEventListener('dblclick', (e) => {
+        e.preventDefault();
+        callback(e);
+      });
+    }
+
+    async function loadSettings() {
+      const res = await fetch('/api/settings');
+      return await res.json();
+    }
+
+    async function loadChannels(tvhUrl) {
+      const res = await fetch('/api/channels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tvheadend_url: tvhUrl })
+      });
+      const j = await res.json();
+      if (!j.ok) return [];
+      return j.channels;
+    }
+
+    function findChannel(channels, uuid) {
+      return channels.find(c => c.uuid === uuid);
+    }
+
+    function buildStreamURL(tvhUrl, channel) {
+      return tvhUrl.replace(/\/$/, '') 
+        + '/stream/channel/' + channel.uuid 
+        // + '?profile=matroska';
+        + '?profile=webtv-mp4';
+    }
+
+    function restartVideo(video, streamUrl) {
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+      video.src = streamUrl;
+      video.play().catch(() => {});
+    }
+
+    function attachStreamMonitor(video, streamUrl, container) {
+      let lastFrameTime = Date.now();
+      let lastRestartTime = 0;
+      const STARTUP_GRACE = 25000;   // 25 seconds
+      const RESTART_COOLDOWN = 10000; // 10 seconds
+
+      const markStalled = () => container.classList.add('video-stalled');
+      const clearStalled = () => container.classList.remove('video-stalled');
+
+      const safeRestart = () => {
+        const now = Date.now();
+
+        // Prevent restart loops
+        if (now - lastRestartTime < RESTART_COOLDOWN) return;
+        lastRestartTime = now;
+
+        markStalled();
+
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+
+        setTimeout(() => {
+          video.src = streamUrl;
+          video.play().catch(() => {});
+        }, 300);
+      };
+
+      // Update last frame time when video is actually progressing
+      video.addEventListener('timeupdate', () => {
+        lastFrameTime = Date.now();
+        clearStalled();
+      });
+
+      // If video starts playing, clear stall state
+      video.addEventListener('playing', clearStalled);
+
+      // Error events → restart
+      video.addEventListener('error', safeRestart);
+      video.addEventListener('stalled', safeRestart);
+      video.addEventListener('abort', safeRestart);
+      video.addEventListener('emptied', safeRestart);
+
+      // Watchdog loop
+      setInterval(() => {
+        const now = Date.now();
+
+        // Don’t judge too early
+        if (now - lastRestartTime < STARTUP_GRACE) return;
+
+        // If no frames for 10 seconds → restart
+        if (now - lastFrameTime > 10000) {
+          safeRestart();
+        }
+      }, 2000);
+    }
+
+    let maxedCell = null;
+
+    function enableMaxMode(cell) {
+      const grid = document.getElementById("grid");
+      const maxContainer = document.getElementById("max-container");
+      const maxSlot = document.getElementById("maxed-slot");
+      const smallRow = document.getElementById("small-row");
+
+      // Track audio state of previous maxed video
+      if (maxedCell) {
+        wasMaxedVideoUnmuted = !maxedCell.muted;
+      } else {
+        wasMaxedVideoUnmuted = false;
+      }
+
+      // Collect ALL cells
+      const allCells = [
+        ...grid.querySelectorAll(".cell"),
+        ...smallRow.querySelectorAll(".cell"),
+        ...maxSlot.querySelectorAll(".cell")
+      ];
+
+      // Sort by original index
+      allCells.sort((a, b) =>
+        Number(a.dataset.originalIndex) - Number(b.dataset.originalIndex)
+      );
+
+      // Clear containers
+      maxSlot.innerHTML = "";
+      smallRow.innerHTML = "";
+
+      // Put clicked cell in max slot
+      maxSlot.appendChild(cell);
+
+      // Put all others in small row
+      allCells.forEach(c => {
+        if (c !== cell) smallRow.appendChild(c);
+      });
+
+      // Hide grid, show max container
+      grid.classList.add("grid-hidden");
+      maxContainer.style.display = "flex";
+
+      // Auto-unmute logic
+      if (wasMaxedVideoUnmuted) {
+        // Mute all videos
+        allVideos.forEach((v, idx) => {
+          v.muted = true;
+          allMuteButtons[idx].classList.remove('active');
+          allMuteButtons[idx].textContent = 'Unmute';
+        });
+
+        // Unmute the new maxed video
+        const video = cell.querySelector("video");
+        const idx = allVideos.indexOf(video);
+        if (idx !== -1) {
+          video.muted = false;
+          allMuteButtons[idx].classList.add('active');
+          allMuteButtons[idx].textContent = 'Mute';
+        }
+      }
+
+      maxedCell = cell;
+
+      if (isMobile()) {
+        const docEl = document.documentElement;
+
+        if (!document.fullscreenElement) {
+          if (docEl.requestFullscreen) {
+            docEl.requestFullscreen();
+          } else if (docEl.webkitRequestFullscreen) {
+            docEl.webkitRequestFullscreen(); // iOS Safari
+          }
+        }
+      }
+
+    }
+
+    function disableMaxMode() {
+      const grid = document.getElementById("grid");
+      const maxContainer = document.getElementById("max-container");
+      const smallRow = document.getElementById("small-row");
+      const maxSlot = document.getElementById("maxed-slot");
+
+      // Collect all cells
+      const allCells = [
+        ...smallRow.children,
+        ...maxSlot.children
+      ];
+
+      // Sort by original index
+      allCells.sort((a, b) =>
+        Number(a.dataset.originalIndex) - Number(b.dataset.originalIndex)
+      );
+
+      // Restore in correct order
+      allCells.forEach(c => grid.appendChild(c));
+
+      // Hide max container, show grid
+      maxContainer.style.display = "none";
+      grid.classList.remove("grid-hidden");
+
+      maxedCell = null;
+
+      if (isMobile()) {
+        if (document.fullscreenElement) {
+          if (document.exitFullscreen) {
+            document.exitFullscreen();
+          } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen(); // iOS Safari
+          }
+        }
+      }
+
+    }
+
+    function createCell(tvhUrl, channel, streamUrl, index) {
+      const cellDiv = document.createElement('div');
+      cellDiv.className = 'cell';
+
+      // store original position
+      cellDiv.dataset.originalIndex = index;
+
+      const videoWrapper = document.createElement('div');
+      videoWrapper.className = 'video-wrapper';
+
+      const video = document.createElement('video');
+      video.autoplay = true;
+      video.muted = true;          // start muted
+      video.playsInline = true;
+      video.src = streamUrl;
+      attachStreamMonitor(video, streamUrl, cellDiv);
+
+      videoWrapper.appendChild(video);
+      cellDiv.appendChild(videoWrapper);
+
+      const infoBar = document.createElement('div');
+      infoBar.className = 'info-bar';
+
+      const label = document.createElement('div');
+      label.className = 'channel-label';
+      label.textContent = (channel.number ? channel.number + ' ' : '') + channel.name;
+
+      const muteBtn = document.createElement('button');
+      muteBtn.className = 'mute-btn';
+      muteBtn.textContent = 'Unmute';
+
+      muteBtn.addEventListener('click', () => {
+        handleMuteToggle(video, muteBtn, channel, tvhUrl);
+      });
+
+      const restartBtn = document.createElement('button');
+      restartBtn.className = 'restart-btn';
+      restartBtn.innerHTML = '🔄';   // icon only
+      restartBtn.title = 'Restart stream';
+
+      restartBtn.addEventListener('click', () => {
+        restartVideo(video, streamUrl);
+      });
+
+      infoBar.appendChild(label);
+      infoBar.appendChild(muteBtn);
+      infoBar.appendChild(restartBtn);
+      cellDiv.appendChild(infoBar);
+
+      allVideos.push(video);
+      allMuteButtons.push(muteBtn);
+
+      // Replaced by addDoubleTapListener to accomodate smartphone browsers
+      // cellDiv.addEventListener("dblclick", () => {
+      //   if (!maxedCell) {
+      //     enableMaxMode(cellDiv);
+      //   } else if (maxedCell === cellDiv) {
+      //     disableMaxMode();
+      //   } else {
+      //     enableMaxMode(cellDiv);
+      //   }
+      // });
+
+      addDoubleTapListener(cellDiv, () => {
+        if (!maxedCell) {
+          enableMaxMode(cellDiv);
+        } else if (maxedCell === cellDiv) {
+          disableMaxMode();
+        } else {
+          enableMaxMode(cellDiv);
+        }
+      });
+
+      return cellDiv;
+    }
+
+    function buildAudioURL(tvhUrl, channel) {
+      return tvhUrl.replace(/\/$/, '') +
+            '/stream/channel/' + channel.uuid +
+            '?profile=webtv-mp4';   // or your audio-only profile
+            // '?profile=aac-audio';   // or your audio-only profile
+    }
+
+    let audioSwitching = false;
+
+    async function switchAudioTo(url) {
+      const audio = document.getElementById('audioPlayer');
+
+      if (audioSwitching) return; // prevent overlapping switches
+      audioSwitching = true;
+
+      try {
+        // Stop any current playback cleanly
+        audio.pause();
+        audio.removeAttribute('src'); // safer than src=""
+        audio.load();
+
+        if (!url) {
+          audioSwitching = false;
+          return;
+        }
+
+        // Assign new source
+        audio.src = url;
+
+        // Wait for metadata before playing
+        await audio.play().catch(err => {
+          console.warn("Audio play failed:", err);
+        });
+
+      } finally {
+        audioSwitching = false;
+      }
+    }
+
+    function handleMuteToggle(targetVideo, targetButton, channel, tvhUrl) {
+      const isCurrentlyMuted = targetVideo.muted;
+
+      if (isCurrentlyMuted) {
+        // Mute all videos
+        allVideos.forEach((v, idx) => {
+          v.muted = true;
+          allMuteButtons[idx].classList.remove('active');
+          allMuteButtons[idx].textContent = 'Unmute';
+        });
+
+        // Activate this one
+        targetVideo.muted = false;
+        targetButton.classList.add('active');
+        targetButton.textContent = 'Mute';
+
+        // Switch audio to this channel
+        // const audioUrl = buildAudioURL(tvhUrl, channel);
+        // switchAudioTo(audioUrl);
+
+      } else {
+        // Muting this one
+        targetVideo.muted = true;
+        targetButton.classList.remove('active');
+        targetButton.textContent = 'Unmute';
+
+        // Stop audio
+        // switchAudioTo(null);
+      }
+    }
+
+    function setupGlobalVolumeControl() {
+      const slider = document.getElementById('volumeSlider');
+      const valueLabel = document.getElementById('volumeValue');
+      // const audio = document.getElementById('audioPlayer');
+
+      // Load saved volume or default to 1.0
+      const savedVolume = localStorage.getItem('mosaicAudioVolume');
+      const initialVolume = savedVolume !== null ? parseFloat(savedVolume) : 1.0;
+
+      slider.value = initialVolume;
+      valueLabel.textContent = Math.round(initialVolume * 100) + '%';
+
+      // // Apply stored volume to the audio element only
+      // audio.volume = initialVolume;
+
+      // Apply stored volume to ALL videos 
+      allVideos.forEach(v => v.volume = initialVolume);
+
+      const applyVolume = (val) => {
+        // audio.volume = val;
+        // Apply to all videos
+        allVideos.forEach(v => v.volume = val);
+        
+        valueLabel.textContent = Math.round(val * 100) + '%';
+
+        // Persist the value
+        localStorage.setItem('mosaicAudioVolume', val);
+      };
+
+      slider.addEventListener('input', () => {
+        const val = parseFloat(slider.value);
+        applyVolume(val);
+      });
+    }      
+
+    async function renderGrid() {
+      const cfg = await loadSettings();
+      const channels = await loadChannels(cfg.tvheadend_url);
+
+      // set fixed number of columns from config
+      document.documentElement.style.setProperty('--grid-cols', cfg.grid_cols);
+
+      const container = document.getElementById('grid');
+      container.innerHTML = '';
+      allVideos = [];
+      allMuteButtons = [];
+
+      for (let r = 0; r < cfg.grid_rows; r++) {
+        for (let c = 0; c < cfg.grid_cols; c++) {
+          const index = r * cfg.grid_cols + c;
+
+          const cellCfg = cfg.cells.find(x => x.row === r && x.col === c);
+
+          if (cellCfg && cellCfg.channel_uuid) {
+            const ch = findChannel(channels, cellCfg.channel_uuid);
+            if (ch) {
+              const streamUrl = buildStreamURL(cfg.tvheadend_url, ch);
+              const cell = createCell(cfg.tvheadend_url, ch, streamUrl, index);
+              container.appendChild(cell);
+            } else {
+              const emptyCell = document.createElement('div');
+              emptyCell.className = 'cell empty-cell';
+              emptyCell.textContent = 'Unknown channel';
+              container.appendChild(emptyCell);
+            }
+          } else {
+            const emptyCell = document.createElement('div');
+            emptyCell.className = 'cell empty-cell';
+            emptyCell.textContent = 'Empty';
+            container.appendChild(emptyCell);
+          }
+        }
+      }
+
+      setupGlobalVolumeControl();
+    }
+
+    renderGrid();
+
+    function isMobile() {
+      return /Mobi|Android/i.test(navigator.userAgent);
+    }
+
+    function enterImmersiveMode() {
+      document.body.classList.add('immersive-mode');
+    }
+
+    function exitImmersiveMode() {
+      document.body.classList.remove('immersive-mode');
+    }
+
+    function setupFullscreenButton() {
+      const btn = document.getElementById('fullscreenBtn');
+
+      btn.addEventListener('click', () => {
+        if (isMobile()) { 
+          // Toggle immersive mode on mobile 
+          if (document.body.classList.contains('immersive-mode')) { 
+            exitImmersiveMode(); 
+          } else { 
+            enterImmersiveMode(); 
+          } 
+        } else {
+            // Real fullscreen on desktop
+          const docEl = document.documentElement;
+
+          if (!document.fullscreenElement) {
+            if (docEl.requestFullscreen) {
+              docEl.requestFullscreen();
+            } else if (docEl.webkitRequestFullscreen) {
+              docEl.webkitRequestFullscreen(); // iOS Safari
+            }
+          } else {
+            if (document.exitFullscreen) {
+              document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) {
+              document.webkitExitFullscreen(); // iOS Safari
+            }
+          }
+        }
+      });
+    }
+
+    setupFullscreenButton();
+
+    function setupTapToExitFullscreen() {
+      document.addEventListener('touchend', () => {
+        if (document.fullscreenElement || document.webkitFullscreenElement) {
+          if (document.exitFullscreen) {
+            document.exitFullscreen();
+          } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+          }
+        }
+      });
+    }
+
+    setupTapToExitFullscreen();
+
+    function setupFullscreenHeaderBehavior() {
+      const header = document.querySelector('header');
+
+      document.addEventListener('fullscreenchange', () => {
+        if (document.fullscreenElement) {
+          header.classList.add('hidden-in-fullscreen');
+        } else {
+          header.classList.remove('hidden-in-fullscreen');
+        }
+      });
+
+      // iOS Safari fallback
+      document.addEventListener('webkitfullscreenchange', () => {
+        if (document.webkitFullscreenElement) {
+          header.classList.add('hidden-in-fullscreen');
+        } else {
+          header.classList.remove('hidden-in-fullscreen');
+        }
+      });
+    }
+
+    setupFullscreenHeaderBehavior();
+
+  </script>
+</body>
+</html>
