@@ -1,7 +1,3 @@
-You’ve built a genuinely impressive multiviewer system, Antonis — it deserves a README that explains the architecture clearly and helps future‑you (or anyone else) understand how everything fits together. Below is a clean, structured `README.md` you can drop directly into your repo. It reflects the actual behavior of your system: maxing videos, mobile fullscreen, mute logic, volume control, layout, and the TVH streaming backend.
-
----
-
 # TV Mosaic Multiviewer
 
 A lightweight, browser‑based multiviewer for live TV streams.  
@@ -54,39 +50,280 @@ The interface displays multiple live channels in a responsive grid, allows maxin
 
 ---
 
-## 🚀 Getting Started
+# 📦 Installation
 
-### **1. Install TVHeadend**
-Ensure TVH is running and accessible, with each channel available via:
+This project is a lightweight, static web application.  
+You can run it on any machine that can serve HTML/CSS/JS files — including a Raspberry Pi 4.
 
-```
-http://<tvh-host>:9981/stream/channel/<channel-id>?profile=webtv-mp4
-```
+Below are the recommended installation steps using a Python virtual environment.
 
-### **2. Configure channels**
-Edit `channels.json`:
+---
 
-```json
-[
-  {
-    "name": "Channel 1",
-    "url": "http://tvh:9981/stream/channel/1?profile=webtv-mp4",
-    "logo": "assets/ch1.png"
-  }
-]
+## 1. Clone the repository
+
+```bash
+git clone https://github.com/<your-repo>/tv-mosaic-multiviewer.git
+cd tv-mosaic-multiviewer
 ```
 
-### **3. Serve the project**
-Any static server works:
+---
 
+## 2. Create and activate a virtual environment
+
+Although the project itself is static, using a venv keeps your tools isolated and clean.
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
 ```
-python3 -m http.server
+
+On Windows:
+
+```powershell
+python -m venv venv
+venv\Scripts\activate
+```
+
+---
+
+## 3. Install required Python libraries
+
+The multiviewer itself does **not** require Python libraries, but you may want:
+
+- A simple static server (`http.server`)
+- Optional helpers (e.g., generating channel lists, validating JSON)
+
+Recommended minimal dependencies:
+
+```bash
+pip install flask
+```
+
+If you want to serve the project using Flask instead of a raw static server:
+
+```bash
+pip install flask waitress
+```
+
+If you want to validate your `channels.json`:
+
+```bash
+pip install jsonschema
+```
+
+---
+
+## 4. Start a development server
+
+### Simple Python static server (recommended)
+
+```bash
+python3 -m app.py 7070
 ```
 
 Then open:
 
 ```
-http://<your-device>:8000
+http://<your-device-ip>:7070
+```
+
+Run it:
+
+```bash
+python serve.py
+```
+
+---
+
+## 5. Configure
+
+In a browser navigate to `http://192.168.3.104:7070/`
+
+Configure:
+- TVHeadend Url
+- Grid
+- Channel mappiings to the grid's cells
+
+Make sure:
+
+- TVH is reachable from the device running the browser
+- You use `profile=webtv-mp4` for maximum compatibility
+
+---
+
+## 6. Open the multiviewer
+
+Navigate to:
+
+```
+http://<your-device-ip>:7070
+```
+
+You should now see:
+
+- The responsive grid
+- Live video streams
+- Double‑tap maxing
+- Mobile fullscreen behavior
+- Global volume control
+
+---
+
+
+# 📡 Deployment on Raspberry Pi 4
+
+The multiviewer runs extremely well on a Raspberry Pi 4 thanks to its hardware‑accelerated H.264/H.265 decoding and low power consumption.  
+This section walks you through preparing the Pi, setting up the project, and enabling automatic startup using `systemd`.
+
+---
+
+## 1. Update and install dependencies
+
+```bash
+sudo apt update
+sudo apt upgrade -y
+sudo apt install -y python3 python3-venv git
+```
+
+---
+
+## 2. Clone the project
+
+```bash
+cd /home/pi
+git clone https://github.com/<your-repo>/tv-mosaic-multiviewer.git
+cd tv-mosaic-multiviewer
+```
+
+---
+
+## 3. Create and activate a virtual environment
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+---
+
+## 4. Install optional Python tools (if needed)
+
+```bash
+pip install flask waitress jsonschema
+```
+
+These are optional — the multiviewer itself is static and works with `http.server`.
+
+---
+
+## 5. Test the server manually
+
+```bash
+source venv/bin/activate
+python3 -m app.py 7070
+```
+
+Open in your browser:
+
+```
+http://<raspberry-pi-ip>:7070
+```
+
+If everything loads correctly, continue to the next step.
+
+---
+
+# 🔧 systemd Service (Autostart on Boot)
+
+Create a systemd service file so the multiviewer starts automatically when the Pi boots.
+
+---
+
+## 1. Create the service file
+
+```bash
+sudo nano /etc/systemd/system/multiviewer.service
+```
+
+Paste this:
+
+```ini
+[Unit]
+Description=TV Mosaic Multiviewer
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/tv-mosaic-multiviewer
+ExecStart=/home/pi/tv-mosaic-multiviewer/venv/bin/python3 -m http.server 7070
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Notes
+- `User=pi` ensures the server runs as the normal user.
+- `Restart=always` keeps it alive if it crashes.
+- `WorkingDirectory` must match your actual project path.
+
+---
+
+## 2. Reload systemd
+
+```bash
+sudo systemctl daemon-reload
+```
+
+---
+
+## 3. Enable the service on boot
+
+```bash
+sudo systemctl enable multiviewer.service
+```
+
+---
+
+## 4. Start it now
+
+```bash
+sudo systemctl start multiviewer.service
+```
+
+---
+
+## 5. Check status
+
+```bash
+sudo systemctl status multiviewer.service
+```
+
+You should see:
+
+- Active: **active (running)**
+- ExecStart: python3 -m http.server 7070
+
+Your multiviewer is now permanently running at:
+
+```
+http://<raspberry-pi-ip>:7070
+```
+
+Even after reboots.
+
+
+---
+
+## Prerequisite
+
+### **Install TVHeadend**
+Ensure TVH is running and accessible, with each channel available via:
+
+```
+http://<tvh-host>:9981/stream/channel/<channel-id>?profile=webtv-mp4
 ```
 
 ---
@@ -149,7 +386,3 @@ Unified double‑tap/double‑click handler for mobile and desktop.
 ## 📄 License
 
 MIT License — free to use, modify, and distribute.
-
----
-
-If you want, I can also generate a **shorter README**, a **more technical one**, or a **GitHub‑optimized version with badges and screenshots**.
