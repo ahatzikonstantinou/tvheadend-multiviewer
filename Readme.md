@@ -317,6 +317,45 @@ Even after reboots.
 
 ---
 
+
+## Systemd service
+
+### Install the service
+
+#### **Step 1 — Enable (i.e. autostart) the service using the full path e.g. for /opt/tv-mosaic**
+```
+sudo systemctl enable /opt/tv-mosaic/tv-mosaic.service
+```
+
+#### **Step 2 — Check status**
+```
+sudo systemctl status tv-mosaic.service
+```
+
+#### **Step 3 — View logs**
+```
+journalctl -u mosaic.service -f
+```
+
+### Manage the service
+
+#### **To manually start the service**
+```
+sudo systemctl start tv-mosaic.service
+```
+
+#### **To manually stop the service**
+```
+sudo systemctl stop tv-mosaic.service
+```
+
+#### **To uninstall the service**
+```
+sudo systemctl didsable tv-mosaic.service
+```
+
+---
+
 ## Prerequisite
 
 ### **Install TVHeadend**
