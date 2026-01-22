@@ -1,0 +1,19 @@
+.main-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+}
+
+.left-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cog-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+}
