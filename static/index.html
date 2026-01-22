@@ -3,15 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <title>TV Mosaic Settings</title>
-  <style>
-    body { font-family: sans-serif; margin: 20px; }
-    label { display: block; margin-top: 10px; }
-    .grid-cell { border: 1px solid #ccc; padding: 5px; margin: 2px; }
-    .grid-row { display: flex; }
-  </style>
+  <link rel="stylesheet" href="/static/css/main.css">
+  <!-- <link rel="stylesheet" href="/static/css/common.css"> -->
 </head>
 <body>
-  <h1>TV Mosaic Settings</h1>
+  <header class="main-header"> 
+    <div class="left-controls">
+      <h1>TV Mosaic Settings</h1>
+    </div>
+    <button id="goToChannels" class="cog-btn">📺</button> 
+  </header>
 
   <div>
     <label>
@@ -42,9 +43,21 @@
   <button id="btn-save">Save settings</button>
   <span id="save-status"></span>
 
+  <div id="gridCreator">
+    <input id="newGridName" type="text" placeholder="Enter grid name">
+    <button id="createGridBtn">Create Grid</button>
+  </div>
+
+  <div id="gridList"></div>
+
+
   <script>
     let channels = [];
     let cells = []; // {row, col, channel_uuid}
+
+    document.getElementById("goToChannels").addEventListener("click", () => {
+      window.location.href = "/grid2";
+    });
 
     async function loadSettings() {
       const res = await fetch('/api/settings');
@@ -177,6 +190,44 @@
     });
 
     loadSettings();
+
+    function loadGrids() {
+      const grids = JSON.parse(localStorage.getItem("grids") || "[]");
+      const list = document.getElementById("gridList");
+      list.innerHTML = "";
+
+      grids.forEach(name => {
+        const btn = document.createElement("button");
+        btn.textContent = name;
+        btn.addEventListener("click", () => {
+          window.location.href = "grid2.html?grid=" + encodeURIComponent(name);
+        });
+        list.appendChild(btn);
+      });
+    }
+
+    function createGrid() {
+      const name = document.getElementById("newGridName").value.trim();
+      if (!name) return;
+
+      let grids = JSON.parse(localStorage.getItem("grids") || "[]");
+
+      if (grids.includes(name)) {
+        alert("Grid name must be unique");
+        return;
+      }
+
+      grids.push(name);
+      localStorage.setItem("grids", JSON.stringify(grids));
+
+      loadGrids();
+      document.getElementById("newGridName").value = "";
+    }
+
+    document.getElementById("createGridBtn").addEventListener("click", createGrid);
+
+    loadGrids();
+
   </script>
 </body>
 </html>
