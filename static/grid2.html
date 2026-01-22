@@ -38,114 +38,72 @@
       margin: 0;
     }
 
-    /* Normal layout */ 
-    #fullscreen-wrapper { 
-      position: relative; z-index: 1; 
-    }
-
-    :fullscreen #max-container,
-    :-webkit-full-screen #max-container {
-      height: 100vh;
+    /* Fullscreen root */
+    :fullscreen,
+    :-webkit-full-screen {
       width: 100vw;
-      display: flex;
-      flex-direction: column;
-    }
-
-    :fullscreen #maxed-slot .cell,
-    :-webkit-full-screen #maxed-slot .cell {
-      height: 100%;
-      width: 100%;
-      display: flex;
-      flex-direction: column;
-    }
-
-    :fullscreen #maxed-slot video,
-    :-webkit-full-screen #maxed-slot video {
-      flex: 1 1 auto;
-      width: 100%;
-      height: auto;
-    }
-
-    :fullscreen .infobar,
-    :-webkit-full-screen .infobar {
-      flex: 0 0 auto;
-    }
-
-    :fullscreen #fullscreen-wrapper,
-    :-webkit-full-screen #fullscreen-wrapper {
       height: 100vh;
-      overflow: hidden; /* prevent page scroll */
-      display: flex;
-      flex-direction: column;
+      overflow: hidden;
     }
 
+    /* Hide all cells except the maxed one */
+    :fullscreen .cell,
+    :-webkit-full-screen .cell {
+      display: none !important;
+    }
+
+    :fullscreen .cell.maxed,
+    :-webkit-full-screen .cell.maxed {
+      display: block; /*flex !important;*/
+      /* flex-direction: column;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden; */
+      position: relative;
+    }
+
+    /* Video wrapper fills fullscreen */
+    :fullscreen .cell.maxed .video-wrapper,
+    :-webkit-full-screen .cell.maxed .video-wrapper {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      justify-content: center; /* center horizontally */
+      align-items: center; /* center vertically */
+      /*position: absolute; 
+      top: 0; 
+      left: 0; 
+      right: 0; 
+      bottom: 0; /* full height */
+    }
+
+    /* Video fits exactly */
+    :fullscreen .cell.maxed video,
+    :-webkit-full-screen .cell.maxed video {
+      width: 100vw; /* scale by width */
+      height: auto;
+      max-height: 100vh; /* never exceed screen height */
+      object-fit: contain;
+    }
+
+    /* Hide small row */
     :fullscreen #small-row-container,
     :-webkit-full-screen #small-row-container {
-      flex: 0 0 auto;
-      max-height: 40vh; /* adjust as needed */
-      overflow-y: auto; /* internal scrolling */
+      display: none !important;
     }
+
+    :fullscreen .cell.maxed .info-bar,
+    :-webkit-full-screen .cell.maxed .info-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 10;
+    }
+
+
     /*end of fullscreen tweeks*/
-
-    /* immersive mode for smartphones */
-    body.immersive-mode {
-      overflow: hidden;
-      background: black;
-    }
-
-    /* Hide header in immersive mode */
-    body.immersive-mode header {
-      display: none;
-    }
-
-    /* Hide the grid in immersive mode (we only want max-container + small-row) */
-    body.immersive-mode #grid {
-      display: none;
-    }
-
-    /* Make fullscreen-wrapper fill the viewport and sit on top */
-    body.immersive-mode #fullscreen-wrapper {
-      position: fixed;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      background: black;
-      z-index: 9999;
-    }
-
-    /* Max-container fills most of the screen */
-    body.immersive-mode #max-container {
-      flex: 1 1 auto;
-      display: flex;
-      flex-direction: column;
-    }
-
-    /* Maxed cell fills available space */
-    body.immersive-mode #maxed-slot .cell {
-      flex: 1 1 auto;
-      display: flex;
-      flex-direction: column;
-    }
-
-    /* Video stretches, infobar stays visible */
-    body.immersive-mode #maxed-slot video {
-      flex: 1 1 auto;
-      width: 100%;
-      height: auto;
-    }
-
-    body.immersive-mode .infobar {
-      flex: 0 0 auto;
-    }
-
-    /* Small-row scrolls internally, page itself does NOT scroll */
-    body.immersive-mode #small-row-container {
-      flex: 0 0 auto;
-      max-height: 40vh;      /* tweak as you like */
-      overflow-y: auto;
-    }
-
-    /* end of immersive mode for smartphones */
     
     header span {
       font-size: 14px;
@@ -168,21 +126,6 @@
     .fullscreen-btn:active { 
       background: #555; 
     }
-
-    /*#grid {
-        display: grid;
-        grid-template-columns: repeat(var(--grid-cols), 1fr);
-        grid-auto-rows: auto;
-        align-items: start;
-    }
-
-    .cell {
-      display: flex;
-      flex-direction: column;
-      background: #000;
-      border: 1px solid #333;
-      min-width: 0;
-    }*/
 
     /* for flexibe grid*/
     #grid {
@@ -341,19 +284,13 @@
   <header>
     <span>Global volume:</span>
     <input id="volumeSlider" type="range" min="0" max="1" step="0.01" value="0.0">
-    <span id="volumeValue">0%</span>
-
-    <button id="fullscreenBtn" class="fullscreen-btn">⛶</button>
+    <span id="volumeValue">0%</span>    
   </header>
 
-  <!-- <audio id="audioPlayer" autoplay></audio> -->
-
-  <div id="fullscreen-wrapper">
-    <div id="max-container">
-      <div id="maxed-slot"></div>
-      <div id="small-row-container">
-        <div id="small-row"></div>
-      </div>
+  <div id="max-container">
+    <div id="maxed-slot"></div>
+    <div id="small-row-container">
+      <div id="small-row"></div>
     </div>
   </div>
 
@@ -390,6 +327,8 @@
         callback(e);
       });
     }
+    
+
 
     async function loadSettings() {
       const res = await fetch('/api/settings');
@@ -483,6 +422,20 @@
       }, 2000);
     }
 
+    function updateMuteButton(cell) {
+      const video = cell.querySelector('video');
+      const btn = cell.querySelector('.mute-btn');
+      if (!video || !btn) return;
+
+      if (video.muted) {
+        btn.classList.add('muted');
+        btn.textContent = 'Unmute';
+      } else {
+        btn.classList.remove('muted');
+        btn.textContent = 'Mute';
+      }
+    }
+
     let maxedCell = null;
 
     function enableMaxMode(cell) {
@@ -545,16 +498,38 @@
         }
       }
 
+      cell.classList.add("maxed");
       maxedCell = cell;
-
+      
       if (isMobile()) {
-        const docEl = document.documentElement;
+        // MOBILE: always unmute the maxed video, mute all others
+        allVideos.forEach(v => {
+          v.muted = true;
+          const c = v.closest('.cell');
+          if (c) updateMuteButton(c);
+        });
 
-        if (!document.fullscreenElement) {
-          if (docEl.requestFullscreen) {
-            docEl.requestFullscreen();
-          } else if (docEl.webkitRequestFullscreen) {
-            docEl.webkitRequestFullscreen(); // iOS Safari
+        const video = cell.querySelector('video');
+        if (video) {
+          video.muted = false;
+          updateMuteButton(cell);
+        }
+
+      } else {
+        // DESKTOP: unmute maxed video only if any video is already unmuted
+        const anyUnmuted = allVideos.some(v => !v.muted);
+
+        if (anyUnmuted) {
+          allVideos.forEach(v => {
+            v.muted = true;
+            const c = v.closest('.cell');
+            if (c) updateMuteButton(c);
+          });
+
+          const video = cell.querySelector('video');
+          if (video) {
+            video.muted = false;
+            updateMuteButton(cell);
           }
         }
       }
@@ -585,6 +560,7 @@
       maxContainer.style.display = "none";
       grid.classList.remove("grid-hidden");
 
+      maxedCell.classList.remove("maxed");
       maxedCell = null;
 
       if (isMobile()) {
@@ -651,67 +627,33 @@
       allVideos.push(video);
       allMuteButtons.push(muteBtn);
 
-      // Replaced by addDoubleTapListener to accomodate smartphone browsers
-      // cellDiv.addEventListener("dblclick", () => {
-      //   if (!maxedCell) {
-      //     enableMaxMode(cellDiv);
-      //   } else if (maxedCell === cellDiv) {
-      //     disableMaxMode();
-      //   } else {
-      //     enableMaxMode(cellDiv);
-      //   }
-      // });
-
       addDoubleTapListener(cellDiv, () => {
+        // CASE 1: nothing maxed yet
         if (!maxedCell) {
           enableMaxMode(cellDiv);
-        } else if (maxedCell === cellDiv) {
-          disableMaxMode();
-        } else {
-          enableMaxMode(cellDiv);
-        }
-      });
 
-      return cellDiv;
-    }
-
-    function buildAudioURL(tvhUrl, channel) {
-      return tvhUrl.replace(/\/$/, '') +
-            '/stream/channel/' + channel.uuid +
-            '?profile=webtv-mp4';   // or your audio-only profile
-            // '?profile=aac-audio';   // or your audio-only profile
-    }
-
-    let audioSwitching = false;
-
-    async function switchAudioTo(url) {
-      const audio = document.getElementById('audioPlayer');
-
-      if (audioSwitching) return; // prevent overlapping switches
-      audioSwitching = true;
-
-      try {
-        // Stop any current playback cleanly
-        audio.pause();
-        audio.removeAttribute('src'); // safer than src=""
-        audio.load();
-
-        if (!url) {
-          audioSwitching = false;
+          if (isMobile() && !inFullscreen()) {
+            cellDiv.requestFullscreen?.();
+            cellDiv.webkitRequestFullscreen?.();
+          }
           return;
         }
 
-        // Assign new source
-        audio.src = url;
+        // CASE 2: tapping the already maxed video
+        if (maxedCell === cellDiv) {
+          if (isMobile() && inFullscreen()) {
+            exitFs();
+          } else {
+            disableMaxMode();
+          }
+          return;
+        }
 
-        // Wait for metadata before playing
-        await audio.play().catch(err => {
-          console.warn("Audio play failed:", err);
-        });
+        // CASE 3: switching maxed video
+        enableMaxMode(cellDiv);
+      });
 
-      } finally {
-        audioSwitching = false;
-      }
+      return cellDiv;
     }
 
     function handleMuteToggle(targetVideo, targetButton, channel, tvhUrl) {
@@ -728,20 +670,12 @@
         // Activate this one
         targetVideo.muted = false;
         targetButton.classList.add('active');
-        targetButton.textContent = 'Mute';
-
-        // Switch audio to this channel
-        // const audioUrl = buildAudioURL(tvhUrl, channel);
-        // switchAudioTo(audioUrl);
-
+        targetButton.textContent = 'Mute';        
       } else {
         // Muting this one
         targetVideo.muted = true;
         targetButton.classList.remove('active');
         targetButton.textContent = 'Unmute';
-
-        // Stop audio
-        // switchAudioTo(null);
       }
     }
 
@@ -825,50 +759,51 @@
     renderGrid();
 
     function isMobile() {
-      return /Mobi|Android/i.test(navigator.userAgent);
+      return /Android|iPhone|iPad|iPod|Mobi/i.test(navigator.userAgent);
     }
 
-    function enterImmersiveMode() {
-      document.body.classList.add('immersive-mode');
+    function applyMobileFullscreenFix() {
+      if (!isMobile()) return;
+
+      const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+      if (!fsEl) return;
+
+      const wrapper = fsEl.querySelector('.video-wrapper');
+      // const video = fsEl.querySelector('video');
+
+      const isPortrait = window.innerHeight > window.innerWidth;
+
+      let w;
+
+      if (isPortrait) {
+        // Portrait: use full width
+        w = window.innerWidth + 'px';
+      } else {
+        // Landscape: subtract your 96px offset
+        w = (window.innerWidth - 96) + 'px';
+      }
+
+      fsEl.style.width = w;
+      if (wrapper) wrapper.style.width = w;
     }
 
-    function exitImmersiveMode() {
-      document.body.classList.remove('immersive-mode');
+
+    // optional: update on orientation / resize while in fullscreen
+    window.addEventListener('resize', () => {
+      if (document.fullscreenElement) {
+        applyMobileFullscreenFix();
+      }
+    });
+
+
+    function inFullscreen() {
+      return document.fullscreenElement || document.webkitFullscreenElement;
     }
 
-    function setupFullscreenButton() {
-      const btn = document.getElementById('fullscreenBtn');
-
-      btn.addEventListener('click', () => {
-        if (isMobile()) { 
-          // Toggle immersive mode on mobile 
-          if (document.body.classList.contains('immersive-mode')) { 
-            exitImmersiveMode(); 
-          } else { 
-            enterImmersiveMode(); 
-          } 
-        } else {
-            // Real fullscreen on desktop
-          const docEl = document.documentElement;
-
-          if (!document.fullscreenElement) {
-            if (docEl.requestFullscreen) {
-              docEl.requestFullscreen();
-            } else if (docEl.webkitRequestFullscreen) {
-              docEl.webkitRequestFullscreen(); // iOS Safari
-            }
-          } else {
-            if (document.exitFullscreen) {
-              document.exitFullscreen();
-            } else if (document.webkitExitFullscreen) {
-              document.webkitExitFullscreen(); // iOS Safari
-            }
-          }
-        }
-      });
-    }
-
-    setupFullscreenButton();
+    function exitFs() {
+      if (document.exitFullscreen) document.exitFullscreen();
+      else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    }    
 
     function setupTapToExitFullscreen() {
       document.addEventListener('touchend', () => {
@@ -903,9 +838,46 @@
           header.classList.remove('hidden-in-fullscreen');
         }
       });
-    }
+    }    
 
     setupFullscreenHeaderBehavior();
+
+    function setupFullscreenHandler() {
+      const onFsChange = () => {
+        const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+
+        if (fsEl) {
+          // ENTERING FULLSCREEN
+          applyMobileFullscreenFix();
+          return;
+        }
+
+        // EXITING FULLSCREEN
+        const maxed = document.querySelector('.cell.maxed');
+        if (maxed) {
+          maxed.style.height = '';
+          maxed.style.width = '';
+          const wrapper = maxed.querySelector('.video-wrapper');
+          // const video = maxed.querySelector('video');
+          if (wrapper) {
+            wrapper.style.height = '';
+            wrapper.style.width = '';
+          }
+          // if (video) video.style.height = '';
+        }
+
+        if (maxedCell) {
+          disableMaxMode();
+        }
+      };
+
+      document.addEventListener('fullscreenchange', onFsChange);
+      document.addEventListener('webkitfullscreenchange', onFsChange);
+    }
+
+    document.addEventListener('DOMContentLoaded', setupFullscreenHandler);
+
+
 
   </script>
 </body>

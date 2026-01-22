@@ -42,6 +42,7 @@ SOURCE_FOLDERS=(
 
 SOURCE_FILES=(
     "app.py"
+    "tv-mosaic.service"
 )
 
 # Copy files to Raspberry Pi using rsync

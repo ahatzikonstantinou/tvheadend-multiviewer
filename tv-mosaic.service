@@ -1,0 +1,24 @@
+[Unit]
+Description=TV Mosaic Manager
+After=network.target
+
+[Service]
+Type=simple
+
+# Path to your Python virtual environment
+WorkingDirectory=/opt/tv-mosaic
+ExecStart=/opt/tv-mosaic/venv/bin/python3 /opt/tv-mosaic/app.py
+
+# Restart on crash or failure
+Restart=on-failure
+RestartSec=3
+
+# Environment variables (optional)
+Environment=PYTHONUNBUFFERED=1
+
+# Ensure logs go to journalctl
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
