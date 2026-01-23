@@ -270,3 +270,78 @@ video {
 .grid-hidden {
   display: none !important;
 }
+
+/* EPG */
+#epg-container {
+  width: 100%;
+  margin-top: 20px;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+#epg-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+}
+
+#epg-table th {
+  background: #333;
+  color: white;
+  padding: 8px;
+  text-align: left;
+}
+
+/* Default thin borders */
+#epg-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #777;
+  vertical-align: top;
+  height: auto;
+}
+
+/* Thicker border between channels */ 
+#epg-table tr.channel-start td { 
+  border-top: 3px solid #ddd; 
+}
+
+/* Make channel column narrow */
+#epg-table td.channel-col,
+#epg-table th.channel-col {
+  width: 120px; /* adjust as needed */
+  max-width: 120px;
+  white-space: nowrap;
+}
+
+/* #epg-table tr {
+  background: #fafafa;
+} */
+
+/* Optional: make Start/End columns narrow */
+#epg-table td.start-col,
+#epg-table td.end-col,
+#epg-table th.start-col,
+#epg-table th.end-col {
+  width: 50px;
+  max-width: 50px;
+  white-space: nowrap;
+}
+
+/* Collapsed summary: single line with ellipsis */
+details summary {
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 500px;
+}
+
+/* Expanded summary: show full text, wrap normally */
+details[open] summary {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+}
+
+/* end of EPG */

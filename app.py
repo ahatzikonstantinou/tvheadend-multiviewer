@@ -2,11 +2,14 @@ import json
 import os
 from flask import Flask, request, jsonify, send_from_directory
 import requests
+from datetime import datetime
 
 app = Flask(__name__)
 
 CONFIG_FILE = "config.json"
 
+def format_ts(ts): 
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
@@ -134,7 +137,46 @@ def api_audioinfo():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
 
+@app.route("/api/epg/all")
+def get_all_epg():
+    cfg = load_config()    
+    tvh_url = cfg["tvheadend_url"]
+    if not tvh_url:
+        return jsonify({"ok": False, "error": "No URL"}), 400
+    
+    try:
+        response = requests.get(
+            tvh_url.rstrip("/") + "/api/epg/events/grid",
+            timeout=5
+        )
+        response.raise_for_status()
 
+        data = response.json()
+
+        # Tvheadend returns {"entries": [...], "total": ...}
+        programs = data.get("entries", [])
+        
+        enriched = []
+        for p in programs:
+            start = p.get("start")
+            stop = p.get("stop")
+
+            p["start_str"] = format_ts(start) if start else None
+            p["stop_str"] = format_ts(stop) if stop else None
+
+            enriched.append(p)
+
+        return jsonify({
+            "status": "ok",
+            "count": len(enriched),
+            "programs": enriched
+        })
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=7070, debug=True)

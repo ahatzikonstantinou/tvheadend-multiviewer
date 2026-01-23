@@ -27,6 +27,22 @@
 
   <div id="grid"></div>
 
+  <div id="epg-container">
+    <h2>Electronic Program Guide</h2>
+    <table id="epg-table">
+      <thead>
+        <tr>
+          <th>Channel</th>
+          <th>Start</th>
+          <th>End</th>
+          <th>Title</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
 
   <script>
     let allVideos = [];
@@ -314,8 +330,9 @@
       const cellDiv = document.createElement('div');
       cellDiv.className = 'cell';
 
-      // store original position
+      // store original position and uuid
       cellDiv.dataset.originalIndex = index;
+      cellDiv.dataset.uuid = channel.uuid;
 
       const videoWrapper = document.createElement('div');
       videoWrapper.className = 'video-wrapper';
@@ -522,14 +539,12 @@
       if (wrapper) wrapper.style.width = w;
     }
 
-
     // optional: update on orientation / resize while in fullscreen
     window.addEventListener('resize', () => {
       if (document.fullscreenElement) {
         applyMobileFullscreenFix();
       }
     });
-
 
     function inFullscreen() {
       return document.fullscreenElement || document.webkitFullscreenElement;
@@ -612,6 +627,159 @@
 
     document.addEventListener('DOMContentLoaded', setupFullscreenHandler);
 
+
+    //EPG
+    let epgCache = [];
+    let epgByChannel = {};
+
+    async function refreshEPG() {
+      const response = await fetch("/api/epg/all");
+      const data = await response.json();
+
+      if (data.status === "ok") {
+        epgCache = data.programs;
+        epgByChannel = groupByChannel(epgCache);
+        console.log("EPG refreshed:", epgCache.length, "programs");
+        renderEPGTable();
+      } else {
+        console.error("EPG refresh error:", data.message);
+      }
+    }
+
+    refreshEPG().then(() => {
+      refreshAllInfobars();
+    });
+
+    setInterval(refreshEPG, 5 * 60 * 1000);
+
+    function groupByChannel(programs) {
+      const map = {};
+      programs.forEach(p => {
+        if (!map[p.channelUuid]) {
+          map[p.channelUuid] = [];
+        }
+        map[p.channelUuid].push(p);
+      });
+      return map;
+    }
+
+    function getCurrentProgram(channelUuid) {
+      const now = Date.now() / 1000; // σε seconds
+      const programs = epgByChannel[channelUuid] || [];
+
+      for (const p of programs) {
+        if (p.start <= now && now <= p.stop) {
+          return p;
+        }
+      }
+
+      return null;
+    }
+
+    function refreshAllInfobars() {
+      const cells = document.querySelectorAll(".cell");
+
+      cells.forEach(cell => {
+        const uuid = cell.dataset.uuid;
+        if (!uuid) return;
+
+        const current = getCurrentProgram(uuid);
+        const label = cell.querySelector(".channel-label");
+
+        if (current && label) {
+          label.textContent = 
+            (current.channelNumber ? current.channelNumber + ' ' : '') 
+            + current.channelName + ' - '
+            + (current.title || "");
+        }
+      });
+    }
+
+    setInterval(() => {
+        refreshAllInfobars();
+    }, 30 * 1000);
+
+    function renderEPGTable() {
+      const tbody = document.querySelector("#epg-table tbody");
+      tbody.innerHTML = "";
+
+      // 1. Collect UUIDs currently displayed in the grid
+      const gridCells = document.querySelectorAll("#grid .cell");
+      const gridUUIDs = Array.from(gridCells).map(c => c.dataset.uuid);
+
+      // 2. Sort channels: first those in the grid, then alphabetical
+      const sortedChannels = Object.keys(epgByChannel).sort((a, b) => {
+        const inGridA = gridUUIDs.includes(a);
+        const inGridB = gridUUIDs.includes(b);
+
+        if (inGridA && !inGridB) return -1;
+        if (!inGridA && inGridB) return 1;
+
+        const nameA = epgByChannel[a][0]?.channelName || "";
+        const nameB = epgByChannel[b][0]?.channelName || "";
+        return nameA.localeCompare(nameB);
+      });
+
+      // 3. Build table rows
+      sortedChannels.forEach(uuid => {
+        const programs = epgByChannel[uuid];
+        if (!programs || programs.length === 0) return;
+
+        const channelName = programs[0].channelName;
+        const rowspan = programs.length;
+
+        programs.forEach((p, index) => {
+          const tr = document.createElement("tr");
+
+          // Format HH:MM only
+          const startTime = p.start_str.split(" ")[1];
+          const endTime = p.stop_str.split(" ")[1];
+          
+          if (index === 0) {
+            // Channel name only on first row
+            const tdChannel = document.createElement("td");
+            tdChannel.textContent = channelName;
+            tdChannel.rowSpan = rowspan;
+            tr.appendChild(tdChannel);
+
+            // thick border only between channels
+            tr.classList.add("channel-start");
+          }
+
+          // Start time column
+          const tdStart = document.createElement("td");
+          tdStart.className = "start-col";
+          tdStart.textContent = startTime;
+          tr.appendChild(tdStart);
+
+          // End time column
+          const tdEnd = document.createElement("td");
+          tdEnd.className = "end-col";
+          tdEnd.textContent = endTime;
+          tr.appendChild(tdEnd);
+
+          // Title
+          const tdTitle = document.createElement("td");
+          tdTitle.textContent = p.title || "";
+          tr.appendChild(tdTitle);
+
+          // Description with <details>
+          const tdDesc = document.createElement("td");
+          const desc = p.summary || p.description || "";
+
+          if( desc.length > 0) {
+            tdDesc.innerHTML = `
+              <details>
+                <summary>${desc}</summary>              
+              </details>
+            `;
+          }
+          tr.appendChild(tdDesc);
+
+          tbody.appendChild(tr);
+        });
+      });
+    }
 
 
   </script>
