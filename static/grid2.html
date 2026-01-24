@@ -639,7 +639,7 @@
       if (data.status === "ok") {
         epgCache = data.programs;
         epgByChannel = groupByChannel(epgCache);
-        console.log("EPG refreshed:", epgCache.length, "programs");
+        // console.log("EPG refreshed:", epgCache.length, "programs");
         renderEPGTable();
       } else {
         console.error("EPG refresh error:", data.message);
@@ -706,6 +706,7 @@
       // 1. Collect UUIDs currently displayed in the grid
       const gridCells = document.querySelectorAll("#grid .cell");
       const gridUUIDs = Array.from(gridCells).map(c => c.dataset.uuid);
+      console.log("gridUUIDs:", gridUUIDs);
 
       // 2. Sort channels: first those in the grid, then alphabetical
       const sortedChannels = Object.keys(epgByChannel).sort((a, b) => {
