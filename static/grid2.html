@@ -79,18 +79,16 @@
       });
     }
     
-
-
     async function loadSettings() {
       const res = await fetch('/api/settings');
       return await res.json();
     }
 
-    async function loadChannels(tvhUrl) {
+    async function loadChannels(tvhUrl, tvh_username, tvh_password) {
       const res = await fetch('/api/channels', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tvheadend_url: tvhUrl })
+        body: JSON.stringify({ tvheadend_url: tvhUrl, tvh_username: tvh_username, tvh_password: tvh_password })
       });
       const j = await res.json();
       if (!j.ok) return [];
@@ -468,7 +466,7 @@
 
     async function renderGrid() {
       const cfg = await loadSettings();
-      const channels = await loadChannels(cfg.tvheadend_url);
+      const channels = await loadChannels(cfg.tvheadend_url, cfg.tvh_username, cfg.tvh_password);
 
       // set fixed number of columns from config
       document.documentElement.style.setProperty('--grid-cols', cfg.grid_cols);
@@ -704,9 +702,14 @@
       tbody.innerHTML = "";
 
       // 1. Collect UUIDs currently displayed in the grid
-      const gridCells = document.querySelectorAll("#grid .cell");
-      const gridUUIDs = Array.from(gridCells).map(c => c.dataset.uuid);
-      console.log("gridUUIDs:", gridUUIDs);
+      const gridCells = document.querySelectorAll(
+        "#grid .cell, #small-row .cell, #maxed-slot .cell"
+      );
+
+      // const gridUUIDs = Array.from(gridCells).map(c => c.dataset.uuid);
+      const gridUUIDs = Array.from(gridCells)
+        .map(c => c.dataset.uuid)
+        .filter(Boolean); // remove undefined/null/empty
 
       // 2. Sort channels: first those in the grid, then alphabetical
       const sortedChannels = Object.keys(epgByChannel).sort((a, b) => {
@@ -781,6 +784,82 @@
         });
       });
     }
+
+    // async function applyResponsiveGrid() {
+    //   const grid = document.getElementById("grid");
+    //   if (!grid) return;
+
+    //   const cfg = await loadSettings();
+    //   let rows = cfg.grid_rows;
+    //   let cols = cfg.grid_cols;
+    //   if( cols == rows)
+    //     return;
+
+    //   const gridIsWide = cols > rows;
+
+    //   const width = window.innerWidth;
+    //   const height = window.innerHeight;
+
+    //   // Determine desired layout
+    //   let desiredCols, desiredRows;
+
+    //   if (width > height) {
+    //     // Wide window
+    //     if(gridIsWide)
+    //     {
+    //       desiredCols = cols;
+    //       desiredRows = rows;
+    //     }
+    //     else
+    //     {
+    //       desiredCols = rows;
+    //       desiredRows = cols;
+    //     }
+    //   } else if (height > width) {
+    //     // Tall window 
+    //     if(gridIsWide)
+    //     {
+    //       desiredCols = rows;
+    //       desiredRows = cols;
+    //     }
+    //     else
+    //     {
+    //       desiredCols = cols;
+    //       desiredRows = rows;
+    //     }
+    //   }
+
+    //   // Read current layout
+    //   const currentCols = grid.style.gridTemplateColumns;
+    //   const currentRows = grid.style.gridTemplateRows;
+
+    //   const newCols = `repeat(${desiredCols}, 1fr)`;
+    //   const newRows = `repeat(${desiredRows}, 1fr)`;
+
+    //   // Avoid unnecessary updates
+    //   if (currentCols === newCols && currentRows === newRows) {
+    //     return;
+    //   }
+
+    //   // Apply new layout
+    //   grid.style.gridTemplateColumns = newCols;
+    //   grid.style.gridTemplateRows = newRows;
+    // }
+
+    // // Run once at startup
+    // applyResponsiveGrid();
+
+    // // Run on resize
+    // window.addEventListener("resize", applyResponsiveGrid);
+
+    // let resizeTimer = null;
+
+    // window.addEventListener("resize", () => {
+    //   clearTimeout(resizeTimer);
+    //   resizeTimer = setTimeout(() => {
+    //     applyResponsiveGrid();
+    //   }, 150);
+    // });
 
 
   </script>

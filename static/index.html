@@ -20,8 +20,25 @@
       <input type="text" id="tvh-url" size="40" placeholder="http://192.168.3.104:9981">
     </label>
 
+    <br>
+
+    <label>
+      Username:
+      <input type="text" id="tvh-username" size="20" placeholder="admin">
+    </label>
+
+    <br>
+
+    <label>
+      Password:
+      <input type="password" id="tvh-password" size="20" placeholder="••••••">
+    </label>
+
+    <br>
+
     <button id="btn-test">Test connection</button>
     <span id="test-result"></span>
+
 
     <label>
       Grid rows:
@@ -63,6 +80,8 @@
       const res = await fetch('/api/settings');
       const cfg = await res.json();
       document.getElementById('tvh-url').value = cfg.tvheadend_url || '';
+      document.getElementById("tvh-username").value = cfg.tvh_username || ""; 
+      document.getElementById("tvh-password").value = cfg.tvh_password || "";
       document.getElementById('grid-rows').value = cfg.grid_rows || 3;
       document.getElementById('grid-cols').value = cfg.grid_cols || 4;
       cells = cfg.cells || [];
@@ -138,7 +157,11 @@
       const res = await fetch('/api/test_connection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tvheadend_url: url })
+                body: JSON.stringify({
+          tvheadend_url: document.getElementById("tvh-url").value,
+          tvh_username: document.getElementById("tvh-username").value,
+          tvh_password: document.getElementById("tvh-password").value
+        })
       });
       const j = await res.json();
       if (j.ok) {
@@ -150,12 +173,15 @@
 
     document.getElementById('btn-load-channels').addEventListener('click', async () => {
       const url = document.getElementById('tvh-url').value;
+      const username = document.getElementById('tvh-username').value; 
+      const password = document.getElementById('tvh-password').value;
       const status = document.getElementById('channels-status');
+      console.log('url, username, password:', url, username, password);
       status.textContent = 'Loading...';
       const res = await fetch('/api/channels', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tvheadend_url: url })
+        body: JSON.stringify({ tvheadend_url: url, tvh_username: username, tvh_password: password })
       });
       const j = await res.json();
       if (j.ok) {
@@ -172,6 +198,8 @@
       status.textContent = 'Saving...';
       const body = {
         tvheadend_url: document.getElementById('tvh-url').value,
+        tvh_username: document.getElementById("tvh-username").value,
+        tvh_password: document.getElementById("tvh-password").value,
         grid_rows: parseInt(document.getElementById('grid-rows').value, 10),
         grid_cols: parseInt(document.getElementById('grid-cols').value, 10),
         cells: cells

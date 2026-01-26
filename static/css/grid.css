@@ -124,7 +124,9 @@ header span {
 /* for flexibe grid*/
 #grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(clamp(250px, 32vw, 1200px), 1fr));
+  /* grid-template-columns: repeat(auto-fit, minmax(clamp(250px, 32vw, 1200px), 1fr)); */
+  grid-template-columns: repeat(var(--grid-cols), 1fr)!important; 
+  grid-auto-rows: 1fr;
   gap: 6px;
   /* width: 100%; */
   /* height: 100%; */

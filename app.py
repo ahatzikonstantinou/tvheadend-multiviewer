@@ -46,15 +46,20 @@ def api_settings():
     if request.method == "GET":
         cfg = load_config()
         return jsonify(cfg)
-    else:
-        data = request.get_json(force=True)
-        cfg = load_config()
-        cfg["tvheadend_url"] = data.get("tvheadend_url", cfg["tvheadend_url"])
-        cfg["grid_rows"] = int(data.get("grid_rows", cfg["grid_rows"]))
-        cfg["grid_cols"] = int(data.get("grid_cols", cfg["grid_cols"]))
-        cfg["cells"] = data.get("cells", cfg.get("cells", []))
-        save_config(cfg)
-        return jsonify({"status": "ok"})
+
+    data = request.get_json(force=True)
+    cfg = load_config()
+
+    cfg["tvheadend_url"] = data.get("tvheadend_url", cfg.get("tvheadend_url"))
+    cfg["tvh_username"] = data.get("tvh_username", cfg.get("tvh_username"))
+    cfg["tvh_password"] = data.get("tvh_password", cfg.get("tvh_password"))
+
+    cfg["grid_rows"] = int(data.get("grid_rows", cfg["grid_rows"]))
+    cfg["grid_cols"] = int(data.get("grid_cols", cfg["grid_cols"]))
+    cfg["cells"] = data.get("cells", cfg.get("cells", []))
+
+    save_config(cfg)
+    return jsonify({"status": "ok"})
 
 
 @app.route("/api/test_connection", methods=["POST"])
@@ -63,9 +68,12 @@ def api_test_connection():
     tvh_url = data.get("tvheadend_url")
     if not tvh_url:
         return jsonify({"ok": False, "error": "No URL"}), 400
+    tvh_username = data.get("tvh_username") 
+    tvh_password = data.get("tvh_password")
     try:
         r = requests.get(
             tvh_url.rstrip("/") + "/api/serverinfo",
+            auth=(tvh_username, tvh_password) if tvh_password else None,
             timeout=3
         )
         if r.status_code == 200:
@@ -82,9 +90,12 @@ def api_channels():
     tvh_url = data.get("tvheadend_url")
     if not tvh_url:
         return jsonify({"ok": False, "error": "No URL"}), 400
+    tvh_username = data.get("tvh_username") 
+    tvh_password = data.get("tvh_password")
     try:
         r = requests.get(
             tvh_url.rstrip("/") + "/api/channel/grid?limit=999",
+            auth=(tvh_username, tvh_password) if tvh_password else None,
             timeout=5
         )
         r.raise_for_status()
@@ -143,10 +154,12 @@ def get_all_epg():
     tvh_url = cfg["tvheadend_url"]
     if not tvh_url:
         return jsonify({"ok": False, "error": "No URL"}), 400
-    
+    tvh_username = cfg["tvh_username"]
+    tvh_password = cfg["tvh_password"]
     try:
         response = requests.get(
             tvh_url.rstrip("/") + "/api/epg/events/grid",
+            auth=(tvh_username, tvh_password) if tvh_password else None,
             timeout=5
         )
         response.raise_for_status()

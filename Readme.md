@@ -36,6 +36,10 @@ The interface displays multiple live channels in a responsive grid, allows maxin
 - Custom double‑tap detector ensures consistent behavior on mobile.
 - Avoids browser zoom and gesture conflicts.
 
+### Important!
+Browsers have a limit of 6 concurrent open http connections. Therefore TV-Mosaic can only display 6 concurrent channels. You can have more in the grid, but in order to activate them try hitting refresh until it hijacks the connection of another that is already active.
+If you wish to see more than 6 channels, configure another grid with different chanells and open it in a different browser (or maybe incognito window of the same browser).
+
 ---
 
 ## 📁 Project Structure
@@ -96,7 +100,7 @@ The multiviewer itself does **not** require Python libraries, but you may want:
 Recommended minimal dependencies:
 
 ```bash
-pip install flask
+pip install flask requests
 ```
 
 If you want to serve the project using Flask instead of a raw static server:
