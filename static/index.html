@@ -39,34 +39,58 @@
     <button id="btn-test">Test connection</button>
     <span id="test-result"></span>
 
-
-    <label>
-      Grid rows:
-      <input type="number" id="grid-rows" min="1" max="10" value="3">
-    </label>
-
-    <label>
-      Grid cols:
-      <input type="number" id="grid-cols" min="1" max="10" value="4">
-    </label>
+    <br>
 
     <button id="btn-load-channels">Load channels</button>
     <span id="channels-status"></span>
+
+    <br>
+    <button id="btn-save">Save settings</button>
+    <span id="save-status"></span>
+
   </div>
 
-  <h2>Grid mapping</h2>
+  <h2>Grids</h2>
+
+  <table id="gridTable" border="1" cellspacing="0" cellpadding="6">
+    <thead>
+      <tr>
+        <th data-sort="name">Name</th>
+        <th data-sort="rows">Rows</th>
+        <th data-sort="cols">Cols</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  
+  <h3>Create / Edit Grid</h3>
+
+  <input type="hidden" id="grid-uuid">
+
+  <label>
+    Grid name:
+    <input type="text" id="grid-name">
+  </label>
+
+  <label>
+    Rows:
+    <input type="number" id="grid-rows" min="1" max="10">
+  </label>
+
+  <label>
+    Cols:
+    <input type="number" id="grid-cols" min="1" max="10">
+  </label>
+
+  <button id="btn-new-grid">New Grid</button>
+
+  <br>
+
   <div id="grid-container"></div>
 
-  <button id="btn-save">Save settings</button>
-  <span id="save-status"></span>
-
-  <div id="gridCreator">
-    <input id="newGridName" type="text" placeholder="Enter grid name">
-    <button id="createGridBtn">Create Grid</button>
-  </div>
-
-  <div id="gridList"></div>
-
+  <button id="btn-save-grid">Save Grid</button>
+  <hr>
 
   <script>
     let channels = [];
@@ -82,9 +106,8 @@
       document.getElementById('tvh-url').value = cfg.tvheadend_url || '';
       document.getElementById("tvh-username").value = cfg.tvh_username || ""; 
       document.getElementById("tvh-password").value = cfg.tvh_password || "";
-      document.getElementById('grid-rows').value = cfg.grid_rows || 3;
-      document.getElementById('grid-cols').value = cfg.grid_cols || 4;
       cells = cfg.cells || [];
+      
       renderGrid();
     }
 
@@ -171,7 +194,7 @@
       }
     });
 
-    document.getElementById('btn-load-channels').addEventListener('click', async () => {
+    async function loadChannels(){
       const url = document.getElementById('tvh-url').value;
       const username = document.getElementById('tvh-username').value; 
       const password = document.getElementById('tvh-password').value;
@@ -191,7 +214,8 @@
       } else {
         status.textContent = 'Error: ' + (j.error || 'unknown');
       }
-    });
+    }
+    document.getElementById('btn-load-channels').addEventListener('click',loadChannels);
 
     document.getElementById('btn-save').addEventListener('click', async () => {
       const status = document.getElementById('save-status');
@@ -200,10 +224,180 @@
         tvheadend_url: document.getElementById('tvh-url').value,
         tvh_username: document.getElementById("tvh-username").value,
         tvh_password: document.getElementById("tvh-password").value,
-        grid_rows: parseInt(document.getElementById('grid-rows').value, 10),
-        grid_cols: parseInt(document.getElementById('grid-cols').value, 10),
-        cells: cells
+        grids: grids
       };
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const j = await res.json();
+      status.textContent = j.status === 'ok' ? 'Saved' : 'Error saving';
+    });
+
+    loadSettings();
+
+    let grids = [];   // full grid objects
+
+    // -----------------------------
+    // Load all settings including grids
+    // -----------------------------
+    async function loadSettings() {
+      const res = await fetch('/api/settings');
+      const cfg = await res.json();
+
+      document.getElementById('tvh-url').value = cfg.tvheadend_url || '';
+      document.getElementById("tvh-username").value = cfg.tvh_username || ""; 
+      document.getElementById("tvh-password").value = cfg.tvh_password || "";
+
+      grids = cfg.grids || [];
+      renderGridTable();
+    }
+
+    // -----------------------------
+    // Render sortable grid table
+    // -----------------------------
+    function renderGridTable(sortKey = "name", asc = true) {
+      const tbody = document.querySelector("#gridTable tbody");
+      tbody.innerHTML = "";
+
+      const sorted = [...grids].sort((a, b) => {
+        if (a[sortKey] < b[sortKey]) return asc ? -1 : 1;
+        if (a[sortKey] > b[sortKey]) return asc ? 1 : -1;
+        return 0;
+      });
+
+      sorted.forEach(grid => {
+        const tr = document.createElement("tr");
+
+        tr.innerHTML = `
+          <td>${grid.name}</td>
+          <td>${grid.rows}</td>
+          <td>${grid.cols}</td>
+          <td>
+            <button data-uuid="${grid.uuid}" class="edit-btn">Edit</button>
+            <button data-uuid="${grid.uuid}" class="delete-btn">Delete</button>
+          </td>
+        `;
+
+        tbody.appendChild(tr);
+      });
+
+      document.querySelectorAll(".edit-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          loadGridIntoForm(btn.dataset.uuid);
+        });
+      });
+    }
+
+    // -----------------------------
+    // Load grid into form for editing
+    // -----------------------------
+    function loadGridIntoForm(uuid) {
+      const g = grids.find(x => x.uuid === uuid);
+      if (!g) return;
+
+      document.getElementById("grid-uuid").value = g.uuid;
+      document.getElementById("grid-name").value = g.name;
+      document.getElementById("grid-rows").value = g.rows;
+      document.getElementById("grid-cols").value = g.cols;
+
+      cells = g.cells || [];
+      renderGrid();
+    }
+
+    // -----------------------------
+    // Create new grid (clear form)
+    // -----------------------------
+    document.getElementById("btn-new-grid").addEventListener("click", () => {
+      document.getElementById("grid-uuid").value = "";
+      document.getElementById("grid-name").value = "";
+      document.getElementById("grid-rows").value = 3;
+      document.getElementById("grid-cols").value = 4;
+      cells = [];
+      renderGrid();
+    });
+
+    // -----------------------------
+    // Save grid (create or update)
+    // -----------------------------
+    document.getElementById("btn-save-grid").addEventListener("click", async () => {
+      const uuid = document.getElementById("grid-uuid").value;
+      const name = document.getElementById("grid-name").value.trim();
+      const rows = parseInt(document.getElementById("grid-rows").value);
+      const cols = parseInt(document.getElementById("grid-cols").value);
+
+      if (!name) {
+        alert("Grid name required");
+        return;
+      }
+
+      // enforce unique name
+      if (grids.some(g => g.name === name && g.uuid !== uuid)) {
+        alert("Grid name must be unique");
+        return;
+      }
+
+      let grid;
+
+      if (uuid) {
+        // update existing
+        grid = grids.find(g => g.uuid === uuid);
+        grid.name = name;
+        grid.rows = rows;
+        grid.cols = cols;
+        grid.cells = cells;
+      } else {
+        // create new
+        grid = {
+          uuid,
+          name,
+          rows,
+          cols,
+          cells
+        };
+        grids.push(grid);
+      }
+
+      await saveAllSettings();
+      renderGridTable();
+    });
+
+    // -----------------------------
+    // Delete grid
+    // -----------------------------
+    document.querySelector("#gridTable").addEventListener("click", async (e) => {
+      if (!e.target.classList.contains("delete-btn")) return;
+
+      const uuid = e.target.dataset.uuid;
+      console.log("Deleting " + uuid);
+
+      if (!confirm("Delete this grid?")) return;
+
+      grids = grids.filter(g => g.uuid !== uuid);
+      await saveAllSettings();
+      renderGridTable();
+
+      const current = document.getElementById("grid-uuid").value;
+      if (current === uuid) {
+        document.getElementById("btn-new-grid").click();
+      }
+    });
+
+
+    // -----------------------------
+    // Save everything to backend
+    // -----------------------------
+    async function saveAllSettings() {
+      const status = document.getElementById('save-status');
+      status.textContent = 'Saving...';
+      const body = {
+        tvheadend_url: document.getElementById('tvh-url').value,
+        tvh_username: document.getElementById("tvh-username").value,
+        tvh_password: document.getElementById("tvh-password").value,
+        grids: grids
+      };
+
       const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -215,46 +409,13 @@
       } else {
         status.textContent = 'Error saving';
       }
+    }
+
+    document.addEventListener("DOMContentLoaded", async () => {
+      await loadSettings();
+      await loadChannels();
     });
 
-    loadSettings();
-
-    function loadGrids() {
-      const grids = JSON.parse(localStorage.getItem("grids") || "[]");
-      const list = document.getElementById("gridList");
-      list.innerHTML = "";
-
-      grids.forEach(name => {
-        const btn = document.createElement("button");
-        btn.textContent = name;
-        btn.addEventListener("click", () => {
-          window.location.href = "grid2.html?grid=" + encodeURIComponent(name);
-        });
-        list.appendChild(btn);
-      });
-    }
-
-    function createGrid() {
-      const name = document.getElementById("newGridName").value.trim();
-      if (!name) return;
-
-      let grids = JSON.parse(localStorage.getItem("grids") || "[]");
-
-      if (grids.includes(name)) {
-        alert("Grid name must be unique");
-        return;
-      }
-
-      grids.push(name);
-      localStorage.setItem("grids", JSON.stringify(grids));
-
-      loadGrids();
-      document.getElementById("newGridName").value = "";
-    }
-
-    document.getElementById("createGridBtn").addEventListener("click", createGrid);
-
-    loadGrids();
 
   </script>
 </body>

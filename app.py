@@ -41,25 +41,42 @@ def grid_page():
 def grid2_page():
     return send_from_directory("static", "grid2.html")
 
-@app.route("/api/settings", methods=["GET", "POST"])
-def api_settings():
-    if request.method == "GET":
+@app.route("/api/settings", methods=["GET"])
+def api_get_settings():
         cfg = load_config()
         return jsonify(cfg)
 
-    data = request.get_json(force=True)
-    cfg = load_config()
+# @app.route("/api/settings", methods=["GET", "POST"])
+# def api_settings():
+#     data = request.get_json(force=True)
+#     cfg = load_config()
 
-    cfg["tvheadend_url"] = data.get("tvheadend_url", cfg.get("tvheadend_url"))
-    cfg["tvh_username"] = data.get("tvh_username", cfg.get("tvh_username"))
-    cfg["tvh_password"] = data.get("tvh_password", cfg.get("tvh_password"))
+#     cfg["tvheadend_url"] = data.get("tvheadend_url", cfg.get("tvheadend_url"))
+#     cfg["tvh_username"] = data.get("tvh_username", cfg.get("tvh_username"))
+#     cfg["tvh_password"] = data.get("tvh_password", cfg.get("tvh_password"))
 
-    cfg["grid_rows"] = int(data.get("grid_rows", cfg["grid_rows"]))
-    cfg["grid_cols"] = int(data.get("grid_cols", cfg["grid_cols"]))
-    cfg["cells"] = data.get("cells", cfg.get("cells", []))
+#     cfg["grid_rows"] = int(data.get("grid_rows", cfg["grid_rows"]))
+#     cfg["grid_cols"] = int(data.get("grid_cols", cfg["grid_cols"]))
+#     cfg["cells"] = data.get("cells", cfg.get("cells", []))
 
-    save_config(cfg)
-    return jsonify({"status": "ok"})
+#     save_config(cfg)
+#     return jsonify({"status": "ok"})
+
+import uuid
+
+@app.route("/api/settings", methods=["POST"])
+def api_save_settings():
+    data = request.json
+
+    for grid in data.get("grids", []):
+        if "uuid" not in grid or not grid["uuid"]:
+            grid["uuid"] = str(uuid.uuid4())
+
+    with open("config.json", "w") as f:
+        json.dump(data, f, indent=2)
+
+    return {"status": "ok"}
+
 
 
 @app.route("/api/test_connection", methods=["POST"])

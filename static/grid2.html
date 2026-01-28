@@ -9,6 +9,11 @@
 <body>
   <header class="main-header">
     <div class="left-controls">
+      <label>
+        Select grid:
+        <select id="gridSelector"></select>
+      </label>
+
       <span>Global volume:</span>
       <input id="volumeSlider" type="range" min="0" max="1" step="0.01" value="0.0">
       <span id="volumeValue">0%</span>    
@@ -45,9 +50,11 @@
 
 
   <script>
+    let cfg = null;
     let allVideos = [];
     let allMuteButtons = [];
     let wasMaxedVideoUnmuted = false;
+    let currentGridUuid = null;
 
     document.getElementById("backToIndex").addEventListener("click", () => {
       window.location.href = "/";
@@ -464,23 +471,37 @@
       });
     }      
 
+    function getGridByUuid(config, uuid) {
+      if (!config || !Array.isArray(config.grids)) return null;
+
+      const grid = config.grids.find(g => g.uuid === uuid);
+      if (!grid) return null;
+
+      return {
+        rows: grid.rows,
+        cols: grid.cols,
+        cells: grid.cells || []
+      };
+    }
+
     async function renderGrid() {
-      const cfg = await loadSettings();
       const channels = await loadChannels(cfg.tvheadend_url, cfg.tvh_username, cfg.tvh_password);
 
       // set fixed number of columns from config
-      document.documentElement.style.setProperty('--grid-cols', cfg.grid_cols);
+      const cfgGrid = getGridByUuid(cfg, currentGridUuid);
+      console.log("cfgGrid", cfgGrid);
+      document.documentElement.style.setProperty('--grid-cols', cfgGrid.cols);
 
       const container = document.getElementById('grid');
       container.innerHTML = '';
       allVideos = [];
       allMuteButtons = [];
 
-      for (let r = 0; r < cfg.grid_rows; r++) {
-        for (let c = 0; c < cfg.grid_cols; c++) {
-          const index = r * cfg.grid_cols + c;
+      for (let r = 0; r < cfgGrid.rows; r++) {
+        for (let c = 0; c < cfgGrid.cols; c++) {
+          const index = r * cfgGrid.cols + c;
 
-          const cellCfg = cfg.cells.find(x => x.row === r && x.col === c);
+          const cellCfg = cfgGrid.cells.find(x => x.row === r && x.col === c);
 
           if (cellCfg && cellCfg.channel_uuid) {
             const ch = findChannel(channels, cellCfg.channel_uuid);
@@ -505,8 +526,6 @@
 
       setupGlobalVolumeControl();
     }
-
-    renderGrid();
 
     function isMobile() {
       return /Android|iPhone|iPad|iPod|Mobi/i.test(navigator.userAgent);
@@ -623,8 +642,52 @@
       document.addEventListener('webkitfullscreenchange', onFsChange);
     }
 
-    document.addEventListener('DOMContentLoaded', setupFullscreenHandler);
+    function populateGridDropdown() {
+      const selector = document.getElementById("gridSelector");
+      selector.innerHTML = "";
 
+      // Add default placeholder option
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = "Select grid";
+      selector.appendChild(placeholder);
+
+      // Sort grids alphabetically
+      const sorted = [...cfg.grids].sort((a, b) => a.name.localeCompare(b.name));
+
+      // Add grid options
+      sorted.forEach(grid => {
+        const opt = document.createElement("option");
+        opt.value = grid.uuid;
+        opt.textContent = grid.name;
+        selector.appendChild(opt);
+      });
+
+      // Restore saved selection
+      currentGridUuid = localStorage.getItem("selectedGridUuid");
+
+      if (currentGridUuid && sorted.some(g => g.uuid === currentGridUuid)) {
+        selector.value = currentGridUuid;
+      } else {
+        // No saved grid or saved grid no longer exists
+        selector.value = "";
+        currentGridUuid = null;
+      }
+    }
+
+    document.getElementById("gridSelector").addEventListener("change", () => {
+      currentGridUuid = document.getElementById("gridSelector").value;
+      localStorage.setItem("selectedGridUuid", currentGridUuid);
+      renderGrid();
+    });
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      cfg = await loadSettings();
+      populateGridDropdown();
+      await renderGrid();
+      setupFullscreenHandler();
+      
+    });
 
     //EPG
     let epgCache = [];
@@ -860,7 +923,6 @@
     //     applyResponsiveGrid();
     //   }, 150);
     // });
-
 
   </script>
 </body>
