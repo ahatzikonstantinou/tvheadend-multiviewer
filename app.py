@@ -1,8 +1,14 @@
 import json
 import os
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, send_file, abort
 import requests
+from flask import Response, stream_with_context
 from datetime import datetime
+import subprocess
+import threading
+import hashlib
+import time
+from pathlib import Path
 
 app = Flask(__name__)
 
@@ -97,6 +103,35 @@ def api_test_connection():
             return jsonify({"ok": True})
         else:
             return jsonify({"ok": False, "error": f"HTTP {r.status_code}"}), 200
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 200
+
+
+@app.route("/api/test_rtsp", methods=["POST"])
+def api_test_rtsp():
+    data = request.get_json(force=True)
+    rtsp_url = data.get("rtsp_url")
+    
+    if not rtsp_url:
+        return jsonify({"ok": False, "error": "No URL"}), 400
+    
+    try:
+        # Use ffprobe to test if stream is accessible
+        result = subprocess.run(
+            ['ffprobe', '-v', 'error', '-select_streams', 'v:0', 
+             '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', 
+             rtsp_url],
+            timeout=5,
+            capture_output=True
+        )
+        
+        if result.returncode == 0:
+            return jsonify({"ok": True})
+        else:
+            return jsonify({"ok": False, "error": "Stream not accessible"}), 200
+    
+    except subprocess.TimeoutExpired:
+        return jsonify({"ok": False, "error": "Connection timeout"}), 200
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 200
 
@@ -208,5 +243,142 @@ def get_all_epg():
             "message": str(e)
         }), 500
 
+@app.route('/tvh_proxy/<channel_uuid>')
+def tvh_proxy(channel_uuid):
+    cfg = load_config()    
+    tvh_url = cfg["tvheadend_url"]
+    if not tvh_url:
+        return jsonify({"ok": False, "error": "No URL"}), 400
+    tvh_username = cfg["tvh_username"]
+    tvh_password = cfg["tvh_password"]
+    tvh_url = f"{tvh_url}/stream/channel/{channel_uuid}?profile=webtv-mp4"
+    
+    req = requests.get(
+        tvh_url, 
+        stream=True, 
+        #auth=None,
+        auth=(tvh_username, tvh_password),
+        timeout=15
+    )
+    
+    # Διοχετεύουμε το stream απευθείας στον browser bit-by-bit
+    return Response(
+        stream_with_context(req.iter_content(chunk_size=1024)),
+        content_type=req.headers.get('content-type'),
+        status=req.status_code
+    )        
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=7070, debug=True)
+
+# --- HLS stream manager for RTSP -> HLS conversion (requires ffmpeg) ---
+HLS_ROOT = Path('/tmp/tvmosaic_hls')
+HLS_ROOT.mkdir(parents=True, exist_ok=True)
+
+# Map stream_id -> { 'url': rtsp_url, 'proc': Popen, 'dir': Path }
+hls_streams = {}
+hls_lock = threading.Lock()
+
+def _stream_id_for_url(url: str) -> str:
+    h = hashlib.sha1(url.encode('utf-8')).hexdigest()
+    return h
+
+def start_hls_for_url(rtsp_url: str):
+    sid = _stream_id_for_url(rtsp_url)
+    d = HLS_ROOT / sid
+    d.mkdir(parents=True, exist_ok=True)
+
+    with hls_lock:
+        info = hls_streams.get(sid)
+        if info and info.get('proc') and info['proc'].poll() is None:
+            # already running
+            return sid
+
+        # remove previous files
+        for f in d.glob('*'):
+            try:
+                f.unlink()
+            except Exception:
+                pass
+
+        # ffmpeg command: use TCP for RTSP transport, copy video codec, encode audio to aac
+        cmd = [
+            'ffmpeg', '-rtsp_transport', 'tcp', '-i', rtsp_url,
+            '-c:v', 'copy', '-c:a', 'aac', '-b:a', '96k',
+            '-f', 'hls',
+            '-hls_time', '2',
+            '-hls_list_size', '3',
+            '-hls_flags', 'delete_segments+append_list',
+            '-hls_allow_cache', '0',
+            str(d / 'index.m3u8')
+        ]
+
+        # Start ffmpeg
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        hls_streams[sid] = {
+            'url': rtsp_url,
+            'proc': proc,
+            'dir': d,
+            'last_used': time.time()
+        }
+
+        # Start a watcher thread to restart if ffmpeg exits
+        def _watch():
+            while True:
+                ret = proc.poll()
+                if ret is None:
+                    time.sleep(1)
+                    continue
+                # process exited; remove mapping
+                with hls_lock:
+                    entry = hls_streams.get(sid)
+                    if entry and entry.get('proc') is proc:
+                        hls_streams.pop(sid, None)
+                break
+
+        t = threading.Thread(target=_watch, daemon=True)
+        t.start()
+
+        return sid
+
+def stop_hls_for_id(sid: str):
+    with hls_lock:
+        info = hls_streams.get(sid)
+        if not info:
+            return False
+        proc = info.get('proc')
+        try:
+            proc.terminate()
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        hls_streams.pop(sid, None)
+    return True
+
+
+@app.route('/stream/hls/start', methods=['POST'])
+def api_start_hls():
+    data = request.get_json(force=True)
+    rtsp_url = data.get('rtsp_url')
+    if not rtsp_url:
+        return jsonify({'ok': False, 'error': 'No rtsp_url provided'}), 400
+
+    sid = start_hls_for_url(rtsp_url)
+    playlist_url = f'/stream/hls/{sid}/index.m3u8'
+    return jsonify({'ok': True, 'stream_id': sid, 'playlist': playlist_url})
+
+
+@app.route('/stream/hls/<sid>/<path:filename>')
+def serve_hls(sid, filename):
+    d = HLS_ROOT / sid
+    if not d.exists():
+        return abort(404)
+    fpath = d / filename
+    if not fpath.exists():
+        return abort(404)
+    # serve file
+    return send_from_directory(str(d), filename)
+

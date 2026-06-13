@@ -107,6 +107,8 @@
     }
 
     function buildStreamURL(tvhUrl, channel) {
+      return '/tvh_proxy/' + channel.uuid;
+      
       return tvhUrl.replace(/\/$/, '') 
         + '/stream/channel/' + channel.uuid 
         // + '?profile=matroska';
@@ -331,13 +333,14 @@
 
     }
 
-    function createCell(tvhUrl, channel, streamUrl, index) {
+    function createCell(channel, streamUrl, index, sourceType = 'tvheadend') {
       const cellDiv = document.createElement('div');
       cellDiv.className = 'cell';
 
       // store original position and uuid
       cellDiv.dataset.originalIndex = index;
       cellDiv.dataset.uuid = channel.uuid;
+      cellDiv.dataset.sourceType = sourceType;
 
       const videoWrapper = document.createElement('div');
       videoWrapper.className = 'video-wrapper';
@@ -346,8 +349,33 @@
       video.autoplay = true;
       video.muted = true;          // start muted
       video.playsInline = true;
-      video.src = streamUrl;
-      attachStreamMonitor(video, streamUrl, cellDiv);
+
+      if (sourceType === 'rtsp' && typeof streamUrl === 'string' && streamUrl.startsWith('rtsp://')) {
+        // Start server-side HLS proxy and use returned playlist
+        (async () => {
+          try {
+            const res = await fetch('/stream/hls/start', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ rtsp_url: streamUrl })
+            });
+            const j = await res.json();
+            if (j.ok && j.playlist) {
+              const playlist = j.playlist;
+              video.src = playlist;
+              attachStreamMonitor(video, playlist, cellDiv);
+              video.play().catch(() => {});
+            } else {
+              cellDiv.classList.add('video-stalled');
+            }
+          } catch (e) {
+            cellDiv.classList.add('video-stalled');
+          }
+        })();
+      } else {
+        video.src = streamUrl;
+        attachStreamMonitor(video, streamUrl, cellDiv);
+      }
 
       videoWrapper.appendChild(video);
       cellDiv.appendChild(videoWrapper);
@@ -364,7 +392,7 @@
       muteBtn.textContent = 'Unmute';
 
       muteBtn.addEventListener('click', () => {
-        handleMuteToggle(video, muteBtn, channel, tvhUrl);
+        handleMuteToggle(video, muteBtn, channel);
       });
 
       const restartBtn = document.createElement('button');
@@ -413,7 +441,7 @@
       return cellDiv;
     }
 
-    function handleMuteToggle(targetVideo, targetButton, channel, tvhUrl) {
+    function handleMuteToggle(targetVideo, targetButton, channel) {
       const isCurrentlyMuted = targetVideo.muted;
 
       if (isCurrentlyMuted) {
@@ -503,16 +531,35 @@
 
           const cellCfg = cfgGrid.cells.find(x => x.row === r && x.col === c);
 
-          if (cellCfg && cellCfg.channel_uuid) {
-            const ch = findChannel(channels, cellCfg.channel_uuid);
-            if (ch) {
-              const streamUrl = buildStreamURL(cfg.tvheadend_url, ch);
-              const cell = createCell(cfg.tvheadend_url, ch, streamUrl, index);
+          if (cellCfg) {
+            const sourceType = cellCfg.source_type || 'tvheadend'; // backward compat
+
+            if (sourceType === 'tvheadend' && cellCfg.channel_uuid) {
+              const ch = findChannel(channels, cellCfg.channel_uuid);
+              if (ch) {
+                const streamUrl = buildStreamURL(cfg.tvheadend_url, ch);
+                const cell = createCell(ch, streamUrl, index, sourceType);
+                container.appendChild(cell);
+              } else {
+                const emptyCell = document.createElement('div');
+                emptyCell.className = 'cell empty-cell';
+                emptyCell.textContent = 'Unknown channel';
+                container.appendChild(emptyCell);
+              }
+            } else if (sourceType === 'rtsp' && cellCfg.rtsp_url) {
+              const rtspUrl = cellCfg.rtsp_url;
+              const rtspLabel = cellCfg.rtsp_label || rtspUrl;
+              const cell = createCell(
+                { name: rtspLabel, uuid: rtspUrl },
+                rtspUrl,
+                index,
+                sourceType
+              );
               container.appendChild(cell);
             } else {
               const emptyCell = document.createElement('div');
               emptyCell.className = 'cell empty-cell';
-              emptyCell.textContent = 'Unknown channel';
+              emptyCell.textContent = 'Empty';
               container.appendChild(emptyCell);
             }
           } else {
@@ -742,7 +789,11 @@
 
       cells.forEach(cell => {
         const uuid = cell.dataset.uuid;
+        const sourceType = cell.dataset.sourceType;
         if (!uuid) return;
+
+        // Only update EPG for TVHeadend sources
+        if (sourceType === 'rtsp') return;
 
         const current = getCurrentProgram(uuid);
         const label = cell.querySelector(".channel-label");

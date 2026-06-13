@@ -128,42 +128,168 @@
           label.textContent = `Cell ${r},${c}`;
           cellDiv.appendChild(label);
 
-          const select = document.createElement('select');
-          select.dataset.row = r;
-          select.dataset.col = c;
-
+          // Source type selector
+          const typeSelect = document.createElement('select');
+          typeSelect.className = 'source-type-select';
+          typeSelect.dataset.row = r;
+          typeSelect.dataset.col = c;
+          
           const optNone = document.createElement('option');
           optNone.value = '';
           optNone.textContent = '-- none --';
-          select.appendChild(optNone);
+          typeSelect.appendChild(optNone);
+          
+          const optTVH = document.createElement('option');
+          optTVH.value = 'tvheadend';
+          optTVH.textContent = 'TVHeadend Channel';
+          typeSelect.appendChild(optTVH);
+          
+          const optRTSP = document.createElement('option');
+          optRTSP.value = 'rtsp';
+          optRTSP.textContent = 'RTSP URL';
+          typeSelect.appendChild(optRTSP);
+
+          // Channel selector (TVHeadend)
+          const channelSelect = document.createElement('select');
+          channelSelect.className = 'channel-select';
+          channelSelect.dataset.row = r;
+          channelSelect.dataset.col = c;
+          channelSelect.style.display = 'none';
+
+          const optEmpty = document.createElement('option');
+          optEmpty.value = '';
+          optEmpty.textContent = '-- none --';
+          channelSelect.appendChild(optEmpty);
 
           channels.forEach(ch => {
             const opt = document.createElement('option');
             opt.value = ch.uuid;
             opt.textContent = `${ch.number || ''} ${ch.name}`;
-            select.appendChild(opt);
+            channelSelect.appendChild(opt);
           });
 
-          const existing = cells.find(
-            ce => ce.row === r && ce.col === c
-          );
-          if (existing && existing.channel_uuid) {
-            select.value = existing.channel_uuid;
-          }
+          // RTSP URL input
+          const rtspInput = document.createElement('input');
+          rtspInput.type = 'text';
+          rtspInput.className = 'rtsp-url-input';
+          rtspInput.placeholder = 'rtsp://user:pass@host:554/path';
+          rtspInput.dataset.row = r;
+          rtspInput.dataset.col = c;
+          rtspInput.style.display = 'none';
 
-          select.addEventListener('change', () => {
-            const row = parseInt(select.dataset.row, 10);
-            const col = parseInt(select.dataset.col, 10);
-            const uuid = select.value || null;
-            const idx = cells.findIndex(ce => ce.row === row && ce.col === col);
-            if (idx >= 0) {
-              cells[idx].channel_uuid = uuid;
+          // Test RTSP button
+          const testRtspBtn = document.createElement('button');
+          testRtspBtn.textContent = 'Test';
+          testRtspBtn.className = 'test-rtsp-btn';
+          testRtspBtn.style.display = 'none';
+          testRtspBtn.addEventListener('click', async () => {
+            const url = rtspInput.value;
+            testRtspBtn.textContent = 'Testing...';
+            const res = await fetch('/api/test_rtsp', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ rtsp_url: url })
+            });
+            const j = await res.json();
+            if (j.ok) {
+              testRtspBtn.textContent = '✓ Test';
+              testRtspBtn.style.color = 'green';
+              setTimeout(() => {
+                testRtspBtn.textContent = 'Test';
+                testRtspBtn.style.color = '';
+              }, 2000);
             } else {
-              cells.push({ row, col, channel_uuid: uuid });
+              testRtspBtn.textContent = '✗ Error';
+              testRtspBtn.style.color = 'red';
+              setTimeout(() => {
+                testRtspBtn.textContent = 'Test';
+                testRtspBtn.style.color = '';
+              }, 2000);
             }
           });
 
-          cellDiv.appendChild(select);
+          // Load existing cell config
+          const existing = cells.find(
+            ce => ce.row === r && ce.col === c
+          );
+          
+          if (existing) {
+            const sourceType = existing.source_type || 'tvheadend'; // backward compat
+            typeSelect.value = sourceType;
+
+            if (sourceType === 'tvheadend' && existing.channel_uuid) {
+              channelSelect.value = existing.channel_uuid;
+              channelSelect.style.display = 'inline-block';
+            } else if (sourceType === 'rtsp' && existing.rtsp_url) {
+              rtspInput.value = existing.rtsp_url;
+              rtspInput.style.display = 'inline-block';
+              testRtspBtn.style.display = 'inline-block';
+            }
+          }
+
+          // Type selector change handler
+          typeSelect.addEventListener('change', () => {
+            const sourceType = typeSelect.value;
+            const row = parseInt(typeSelect.dataset.row, 10);
+            const col = parseInt(typeSelect.dataset.col, 10);
+
+            // Show/hide inputs
+            if (sourceType === 'tvheadend') {
+              channelSelect.style.display = 'inline-block';
+              rtspInput.style.display = 'none';
+              testRtspBtn.style.display = 'none';
+            } else if (sourceType === 'rtsp') {
+              channelSelect.style.display = 'none';
+              rtspInput.style.display = 'inline-block';
+              testRtspBtn.style.display = 'inline-block';
+            } else {
+              channelSelect.style.display = 'none';
+              rtspInput.style.display = 'none';
+              testRtspBtn.style.display = 'none';
+            }
+
+            // Update cells array
+            const idx = cells.findIndex(ce => ce.row === row && ce.col === col);
+            if (sourceType === '') {
+              // Remove cell
+              if (idx >= 0) {
+                cells.splice(idx, 1);
+              }
+            } else {
+              if (idx >= 0) {
+                cells[idx].source_type = sourceType;
+              } else {
+                cells.push({ row, col, source_type: sourceType });
+              }
+            }
+          });
+
+          // Channel select change handler
+          channelSelect.addEventListener('change', () => {
+            const row = parseInt(channelSelect.dataset.row, 10);
+            const col = parseInt(channelSelect.dataset.col, 10);
+            const uuid = channelSelect.value || null;
+            const idx = cells.findIndex(ce => ce.row === row && ce.col === col);
+            if (idx >= 0) {
+              cells[idx].channel_uuid = uuid;
+            }
+          });
+
+          // RTSP input change handler
+          rtspInput.addEventListener('change', () => {
+            const row = parseInt(rtspInput.dataset.row, 10);
+            const col = parseInt(rtspInput.dataset.col, 10);
+            const url = rtspInput.value || null;
+            const idx = cells.findIndex(ce => ce.row === row && ce.col === col);
+            if (idx >= 0) {
+              cells[idx].rtsp_url = url;
+            }
+          });
+
+          cellDiv.appendChild(typeSelect);
+          cellDiv.appendChild(channelSelect);
+          cellDiv.appendChild(rtspInput);
+          cellDiv.appendChild(testRtspBtn);
           rowDiv.appendChild(cellDiv);
         }
         container.appendChild(rowDiv);
