@@ -107,12 +107,11 @@
     }
 
     function buildStreamURL(tvhUrl, channel) {
-      return '/tvh_proxy/' + channel.uuid;
+      // return '/tvh_proxy/' + channel.uuid; // tvh_proxy causes a lot of freeze ups to all streams
       
       return tvhUrl.replace(/\/$/, '') 
         + '/stream/channel/' + channel.uuid 
-        // + '?profile=matroska';
-        + '?profile=webtv-mp4';
+        + '?profile=webtv-mp4'; // custom created stream profile in tvheadend based on type MP4/av-lib
     }
 
     function restartVideo(video, streamUrl) {

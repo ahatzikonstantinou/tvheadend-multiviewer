@@ -243,6 +243,7 @@ def get_all_epg():
             "message": str(e)
         }), 500
 
+# tvh_proxy is a simple proxy endpoint that takes a channel UUID, constructs the stream URL for that channel, and proxies the stream back to the client. This is used to work around CORS issues when trying to access the TVHeadend stream directly from the browser. However, it causes continues freeze-ups in all streams.
 @app.route('/tvh_proxy/<channel_uuid>')
 def tvh_proxy(channel_uuid):
     cfg = load_config()    
