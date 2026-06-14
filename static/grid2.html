@@ -112,14 +112,29 @@
       return tvhUrl.replace(/\/$/, '') 
         + '/stream/channel/' + channel.uuid 
         + '?profile=webtv-mp4'; // custom created stream profile in tvheadend based on type MP4/av-lib
+        // for access without login, create a user in tvheadend with username "*", put hime first
+        // in the list of users, and do NOT give hime a  password.
     }
 
     function restartVideo(video, streamUrl) {
       video.pause();
       video.removeAttribute('src');
       video.load();
-      video.src = streamUrl;
+      const targetSrc = video.dataset.streamUrl || streamUrl;
+      video.src = targetSrc;
       video.play().catch(() => {});
+    }
+
+    function setVideoSource(video, src, isHls = false) {
+      video.dataset.streamUrl = src;
+      try {
+        video.src = src;
+      } catch (e) {
+        // fallback: setAttribute
+        try { video.setAttribute('src', src); } catch (e) {}
+      }
+      // best-effort play
+      try { video.play().catch(()=>{}); } catch(e){}
     }
 
     function attachStreamMonitor(video, streamUrl, container) {
@@ -344,26 +359,24 @@
       const videoWrapper = document.createElement('div');
       videoWrapper.className = 'video-wrapper';
 
-      const video = document.createElement('video');
+      let video = document.createElement('video');
       video.autoplay = true;
       video.muted = true;          // start muted
       video.playsInline = true;
 
       if (sourceType === 'rtsp' && typeof streamUrl === 'string' && streamUrl.startsWith('rtsp://')) {
-        // Start server-side HLS proxy and use returned playlist
+        // Start server-side progressive MP4 stream and use returned file URL
         (async () => {
           try {
-            const res = await fetch('/stream/hls/start', {
+            const res = await fetch('/stream/mp4/start', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ rtsp_url: streamUrl })
             });
             const j = await res.json();
-            if (j.ok && j.playlist) {
-              const playlist = j.playlist;
-              video.src = playlist;
-              attachStreamMonitor(video, playlist, cellDiv);
-              video.play().catch(() => {});
+            if (j.ok && j.stream_url) {
+              setVideoSource(video, j.stream_url);
+              attachStreamMonitor(video, j.stream_url, cellDiv);
             } else {
               cellDiv.classList.add('video-stalled');
             }

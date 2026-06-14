@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort
 import requests
 from flask import Response, stream_with_context
@@ -269,16 +270,20 @@ def tvh_proxy(channel_uuid):
         status=req.status_code
     )        
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=7070, debug=True)
-
 # --- HLS stream manager for RTSP -> HLS conversion (requires ffmpeg) ---
-HLS_ROOT = Path('/tmp/tvmosaic_hls')
+HLS_ROOT = Path(tempfile.gettempdir()) / 'tvmosaic_hls'
 HLS_ROOT.mkdir(parents=True, exist_ok=True)
 
 # Map stream_id -> { 'url': rtsp_url, 'proc': Popen, 'dir': Path }
 hls_streams = {}
 hls_lock = threading.Lock()
+
+# --- MP4 stream manager for RTSP -> progressive MP4 output ---
+MP4_ROOT = Path(tempfile.gettempdir()) / 'tvmosaic_mp4'
+MP4_ROOT.mkdir(parents=True, exist_ok=True)
+
+mp4_streams = {}
+mp4_lock = threading.Lock()
 
 def _stream_id_for_url(url: str) -> str:
     h = hashlib.sha1(url.encode('utf-8')).hexdigest()
@@ -292,49 +297,78 @@ def start_hls_for_url(rtsp_url: str):
     with hls_lock:
         info = hls_streams.get(sid)
         if info and info.get('proc') and info['proc'].poll() is None:
-            # already running
+            # already running — update last_used and return
+            info['last_used'] = time.time()
             return sid
 
-        # remove previous files
+        # remove previous generated files
         for f in d.glob('*'):
             try:
                 f.unlink()
             except Exception:
                 pass
 
-        # ffmpeg command: use TCP for RTSP transport, copy video codec, encode audio to aac
-        cmd = [
-            'ffmpeg', '-rtsp_transport', 'tcp', '-i', rtsp_url,
-            '-c:v', 'copy', '-c:a', 'aac', '-b:a', '96k',
+        # Build ffmpeg command. For RTSP inputs we re-encode to provide
+        # stable frame/keyframe intervals and predictable segments for browsers.
+        cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'info']
+        if rtsp_url.startswith('rtsp://'):
+            # RTSP: request TCP transport and re-encode video to h264 with
+            # low-latency settings so browsers can append segments reliably.
+            cmd += ['-rtsp_transport', 'tcp', '-i', rtsp_url,
+                    '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency',
+                    '-r', '25', '-g', '50', '-keyint_min', '50', '-b:v', '1200k',
+                    '-c:a', 'aac', '-b:a', '96k']
+        else:
+            # HTTP / file inputs: copy video where possible to save CPU.
+            cmd += ['-i', rtsp_url, '-c:v', 'copy', '-c:a', 'aac', '-b:a', '96k']
+
+        cmd += [
             '-f', 'hls',
-            '-hls_time', '2',
-            '-hls_list_size', '3',
+            '-hls_time', '4',
+            '-hls_list_size', '6',
             '-hls_flags', 'delete_segments+append_list',
+                '-hls_segment_type', 'fmp4',
+                '-hls_fmp4_init_filename', 'init.mp4',
             '-hls_allow_cache', '0',
             str(d / 'index.m3u8')
         ]
 
-        # Start ffmpeg
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Start ffmpeg and capture stderr to a log for debugging
+        log_path = d / 'ffmpeg.log'
+        logfh = open(log_path, 'ab')
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=logfh)
+
+        # wait up to ~10s for the playlist to appear
+        for _ in range(20):
+            if (d / 'index.m3u8').exists() and (d / 'index.m3u8').stat().st_size > 0:
+                break
+            time.sleep(0.5)
 
         hls_streams[sid] = {
             'url': rtsp_url,
             'proc': proc,
             'dir': d,
+            'log': str(log_path),
+            'logfh': logfh,
             'last_used': time.time()
         }
 
-        # Start a watcher thread to restart if ffmpeg exits
+        # watcher: remove mapping and close log when process exits
         def _watch():
             while True:
                 ret = proc.poll()
                 if ret is None:
                     time.sleep(1)
                     continue
-                # process exited; remove mapping
                 with hls_lock:
                     entry = hls_streams.get(sid)
                     if entry and entry.get('proc') is proc:
+                        try:
+                            lf = entry.get('logfh')
+                            if lf:
+                                lf.close()
+                        except Exception:
+                            pass
                         hls_streams.pop(sid, None)
                 break
 
@@ -356,20 +390,160 @@ def stop_hls_for_id(sid: str):
                 proc.kill()
             except Exception:
                 pass
+        # close log file handle if present
+        try:
+            lf = info.get('logfh')
+            if lf:
+                lf.close()
+        except Exception:
+            pass
         hls_streams.pop(sid, None)
     return True
 
 
-@app.route('/stream/hls/start', methods=['POST'])
-def api_start_hls():
+def start_mp4_for_url(rtsp_url: str):
+    sid = _stream_id_for_url(rtsp_url)
+    d = MP4_ROOT / sid
+    d.mkdir(parents=True, exist_ok=True)
+
+    with mp4_lock:
+        info = mp4_streams.get(sid)
+        if info and info.get('proc') and info['proc'].poll() is None:
+            info['last_used'] = time.time()
+            return sid
+
+        for f in d.glob('*'):
+            try:
+                f.unlink()
+            except Exception:
+                pass
+
+        cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'info', '-fflags', '+genpts']
+        if rtsp_url.startswith('rtsp://'):
+            cmd += ['-rtsp_transport', 'tcp', '-i', rtsp_url]
+        else:
+            cmd += ['-i', rtsp_url]
+
+        cmd += [
+            '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency',
+            '-r', '25', '-g', '50', '-keyint_min', '50', '-b:v', '1200k',
+            '-c:a', 'aac', '-b:a', '96k',
+            '-f', 'mp4',
+            '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+            '-y', str(d / 'stream.mp4')
+        ]
+
+        log_path = d / 'ffmpeg.log'
+        logfh = open(log_path, 'ab')
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=logfh)
+
+        for _ in range(20):
+            if (d / 'stream.mp4').exists() and (d / 'stream.mp4').stat().st_size > 1024:
+                break
+            time.sleep(0.5)
+
+        mp4_streams[sid] = {
+            'url': rtsp_url,
+            'proc': proc,
+            'dir': d,
+            'log': str(log_path),
+            'logfh': logfh,
+            'last_used': time.time()
+        }
+
+        def _watch():
+            while True:
+                ret = proc.poll()
+                if ret is None:
+                    time.sleep(1)
+                    continue
+                with mp4_lock:
+                    entry = mp4_streams.get(sid)
+                    if entry and entry.get('proc') is proc:
+                        try:
+                            lf = entry.get('logfh')
+                            if lf:
+                                lf.close()
+                        except Exception:
+                            pass
+                        mp4_streams.pop(sid, None)
+                break
+
+        t = threading.Thread(target=_watch, daemon=True)
+        t.start()
+
+        return sid
+
+
+def stop_mp4_for_id(sid: str):
+    with mp4_lock:
+        info = mp4_streams.get(sid)
+        if not info:
+            return False
+        proc = info.get('proc')
+        try:
+            proc.terminate()
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        try:
+            lf = info.get('logfh')
+            if lf:
+                lf.close()
+        except Exception:
+            pass
+        mp4_streams.pop(sid, None)
+    return True
+
+
+@app.route('/stream/mp4/start', methods=['POST'])
+def api_start_mp4():
     data = request.get_json(force=True)
     rtsp_url = data.get('rtsp_url')
-    if not rtsp_url:
-        return jsonify({'ok': False, 'error': 'No rtsp_url provided'}), 400
+    source_url = data.get('source_url')
 
-    sid = start_hls_for_url(rtsp_url)
-    playlist_url = f'/stream/hls/{sid}/index.m3u8'
-    return jsonify({'ok': True, 'stream_id': sid, 'playlist': playlist_url})
+    url = rtsp_url or source_url
+    if not url:
+        return jsonify({'ok': False, 'error': 'No rtsp_url or source_url provided'}), 400
+
+    try:
+        sid = start_mp4_for_url(url)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+    stream_url = f'/stream/mp4/{sid}/stream.mp4'
+    return jsonify({'ok': True, 'stream_id': sid, 'stream_url': stream_url})
+
+
+@app.route('/stream/mp4/<sid>/stream.mp4')
+def serve_mp4(sid):
+    d = MP4_ROOT / sid
+    if not d.exists():
+        return abort(404)
+    fpath = d / 'stream.mp4'
+    if not fpath.exists():
+        return abort(404)
+
+    info = mp4_streams.get(sid)
+    proc = info.get('proc') if info else None
+
+    def generate():
+        with open(fpath, 'rb') as f:
+            while True:
+                chunk = f.read(65536)
+                if chunk:
+                    yield chunk
+                    continue
+                if proc is not None and proc.poll() is not None:
+                    # FFmpeg finished and no more data is available
+                    break
+                time.sleep(0.1)
+
+    resp = Response(stream_with_context(generate()), mimetype='video/mp4')
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return resp
 
 
 @app.route('/stream/hls/<sid>/<path:filename>')
@@ -381,5 +555,23 @@ def serve_hls(sid, filename):
     if not fpath.exists():
         return abort(404)
     # serve file
-    return send_from_directory(str(d), filename)
+    resp = send_from_directory(str(d), filename)
+    # prevent aggressive caching by browsers
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return resp
+
+
+@app.route('/stream/hls/status/<sid>')
+def hls_status(sid):
+    d = HLS_ROOT / sid
+    if not d.exists():
+        return jsonify({'ok': False, 'error': 'no such sid'}), 404
+    playlist = d / 'index.m3u8'
+    has_playlist = playlist.exists() and playlist.stat().st_size > 0
+    has_segments = any(d.glob('*.m4s')) or (d / 'init.mp4').exists()
+    return jsonify({'ok': True, 'sid': sid, 'has_playlist': has_playlist, 'has_segments': has_segments})
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=7070, debug=True)
 
