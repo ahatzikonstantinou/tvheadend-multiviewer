@@ -54,22 +54,6 @@ def api_get_settings():
         cfg = load_config()
         return jsonify(cfg)
 
-# @app.route("/api/settings", methods=["GET", "POST"])
-# def api_settings():
-#     data = request.get_json(force=True)
-#     cfg = load_config()
-
-#     cfg["tvheadend_url"] = data.get("tvheadend_url", cfg.get("tvheadend_url"))
-#     cfg["tvh_username"] = data.get("tvh_username", cfg.get("tvh_username"))
-#     cfg["tvh_password"] = data.get("tvh_password", cfg.get("tvh_password"))
-
-#     cfg["grid_rows"] = int(data.get("grid_rows", cfg["grid_rows"]))
-#     cfg["grid_cols"] = int(data.get("grid_cols", cfg["grid_cols"]))
-#     cfg["cells"] = data.get("cells", cfg.get("cells", []))
-
-#     save_config(cfg)
-#     return jsonify({"status": "ok"})
-
 import uuid
 
 @app.route("/api/settings", methods=["POST"])
@@ -84,29 +68,6 @@ def api_save_settings():
         json.dump(data, f, indent=2)
 
     return {"status": "ok"}
-
-
-
-@app.route("/api/test_connection", methods=["POST"])
-def api_test_connection():
-    data = request.get_json(force=True)
-    tvh_url = data.get("tvheadend_url")
-    if not tvh_url:
-        return jsonify({"ok": False, "error": "No URL"}), 400
-    tvh_username = data.get("tvh_username") 
-    tvh_password = data.get("tvh_password")
-    try:
-        r = requests.get(
-            tvh_url.rstrip("/") + "/api/serverinfo",
-            auth=(tvh_username, tvh_password) if tvh_password else None,
-            timeout=3
-        )
-        if r.status_code == 200:
-            return jsonify({"ok": True})
-        else:
-            return jsonify({"ok": False, "error": f"HTTP {r.status_code}"}), 200
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 200
 
 
 @app.route("/api/test_rtsp", methods=["POST"])

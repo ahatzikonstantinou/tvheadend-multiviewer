@@ -88,14 +88,19 @@
     
     async function loadSettings() {
       const res = await fetch('/api/settings');
-      return await res.json();
+      cfg = await res.json();
+      console.log(cfg);
+      return cfg;
     }
 
     async function loadChannels(tvhUrl, tvh_username, tvh_password) {
+      // Αν το tvhUrlOrArray είναι Array, παίρνουμε το πρώτο στοιχείο. Αν είναι String, το κρατάμε ως έχει.
+      const mainUrl = Array.isArray(tvhUrl) ? tvhUrl[0] : tvhUrl;
+
       const res = await fetch('/api/channels', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tvheadend_url: tvhUrl, tvh_username: tvh_username, tvh_password: tvh_password })
+        body: JSON.stringify({ tvheadend_url: mainUrl, tvh_username: tvh_username, tvh_password: tvh_password })
       });
       const j = await res.json();
       if (!j.ok) return [];
@@ -106,10 +111,23 @@
       return channels.find(c => c.uuid === uuid);
     }
 
-    function buildStreamURL(tvhUrl, channel) {
+    let streamCounter = 0;
+    function buildStreamURL(tvhUrl, channel) {      
       // return '/tvh_proxy/' + channel.uuid; // tvh_proxy causes a lot of freeze ups to all streams
       
-      return tvhUrl.replace(/\/$/, '') 
+      streamCounter++;
+      // Μετατροπή σε Array αν για κάποιο λόγο ήρθε String (fallback)
+      const urls = Array.isArray(tvhUrl) ? tvhUrl : [tvhUrl];
+      // Καθαρισμός των URLs από τυχόν τελικά slashes
+      const cleanUrls = urls.map(u => u.trim().replace(/\/$/, '')).filter(u => u !== '');
+
+      let baseUrl = cleanUrls[0] || 'http://localhost:9981';
+      if (cleanUrls.length > 1) {
+        // Βρίσκουμε σε ποιο "γκρουπ των 6" ανήκει το τρέχον κανάλι
+        const urlIndex = Math.floor(streamCounter / 6) % cleanUrls.length;
+        baseUrl = cleanUrls[urlIndex];
+      }
+      return baseUrl  //tvhUrl.replace(/\/$/, '') 
         + '/stream/channel/' + channel.uuid 
         + '?profile=webtv-mp4'; // custom created stream profile in tvheadend based on type MP4/av-lib
         // for access without login, create a user in tvheadend with username "*", put hime first
@@ -525,7 +543,11 @@
     }
 
     async function renderGrid() {
-      const channels = await loadChannels(cfg.tvheadend_url, cfg.tvh_username, cfg.tvh_password);
+      streamCounter = 0; // Μηδενισμός του μετρητή πριν ξεκινήσει το σχεδίασμα των καναλιών
+
+      // Αν στο config δεν υπάρχει το array, δημιουργούμε ένα array από το παλιό string
+      const urlsSource = cfg.tvheadend_urls || [cfg.tvheadend_url];
+      const channels = await loadChannels(urlsSource, cfg.tvh_username, cfg.tvh_password);
 
       // set fixed number of columns from config
       const cfgGrid = getGridByUuid(cfg, currentGridUuid);
@@ -549,7 +571,7 @@
             if (sourceType === 'tvheadend' && cellCfg.channel_uuid) {
               const ch = findChannel(channels, cellCfg.channel_uuid);
               if (ch) {
-                const streamUrl = buildStreamURL(cfg.tvheadend_url, ch);
+                const streamUrl = buildStreamURL(urlsSource, ch);
                 const cell = createCell(ch, streamUrl, index, sourceType);
                 container.appendChild(cell);
               } else {

@@ -13,12 +13,13 @@
     </div>
     <button id="goToChannels" class="cog-btn">📺</button> 
   </header>
-
+  
   <div>
-    <label>
-      TVHeadend URL:
-      <input type="text" id="tvh-url" size="40" placeholder="http://192.168.3.104:9981">
-    </label>
+    <label><strong>TVHeadend URLs (for domain sharing, 6 streams per url):</strong></label>
+    <!-- Εδώ θα προστίθενται δυναμικά τα URLs -->
+    <div id="url-container" style="margin-top: 5px; margin-bottom: 10px;"></div>
+    
+    <button type="button" id="btn-add-url" style="margin-bottom: 15px;">+ Add URL</button>
 
     <br>
 
@@ -36,18 +37,12 @@
 
     <br>
 
-    <button id="btn-test">Test connection</button>
-    <span id="test-result"></span>
-
-    <br>
-
     <button id="btn-load-channels">Load channels</button>
     <span id="channels-status"></span>
 
     <br>
     <button id="btn-save">Save settings</button>
     <span id="save-status"></span>
-
   </div>
 
   <h2>Grids</h2>
@@ -93,6 +88,106 @@
   <hr>
 
   <script>
+    // Αρχικοποίηση των στοιχείων του DOM
+    const urlContainer = document.getElementById('url-container');
+    const btnAddUrl = document.getElementById('btn-add-url');
+
+    // Συνάρτηση που δημιουργεί μια νέα γραμμή URL με το κουμπί Test και Delete
+    function createUrlRow(value = '') {
+      const row = document.createElement('div');
+      row.style.marginBottom = '8px';
+      row.className = 'url-row';
+
+      row.innerHTML = `
+        <input type="text" class="tvh-url-input" size="40" placeholder="http://192.168.3.104:9981" value="${value}">
+        <button type="button" class="btn-test-single">Test</button>
+        <button type="button" class="btn-delete-url" style="color: red;">X</button>
+        <span class="test-result-single" style="margin-left: 10px; font-weight: bold;"></span>
+      `;
+
+      // Λειτουργία του κουμπιού Test για το συγκεκριμένο URL
+      row.querySelector('.btn-test-single').addEventListener('click', async function() {
+        const input = row.querySelector('.tvh-url-input');
+        const resultSpan = row.querySelector('.test-result-single');
+        const url = input.value.trim().replace(/\/$/, '');
+        
+        if (!url) {
+          resultSpan.textContent = '❌ Empty URL';
+          resultSpan.style.color = 'orange';
+          return;
+        }
+
+        resultSpan.textContent = '⏳ Testing...';
+        resultSpan.style.color = 'gray';
+
+        // Χρήση των credentials αν υπάρχουν
+        const username = document.getElementById('tvh-username').value.trim();
+        const password = document.getElementById('tvh-password').value.trim();
+        
+        let fetchOptions = {};
+        if (username && password) {
+          const headers = new Headers();
+          headers.set('Authorization', 'Basic ' + btoa(username + ":" + password));
+          fetchOptions.headers = headers;
+        }
+
+        try {
+          // Δοκιμάζουμε να καλέσουμε το επίσημο API του Tvheadend για να δούμε αν απαντάει
+          const response = await fetch(`${url}/api/status/inputs`, fetchOptions);
+          if (response.ok) {
+            resultSpan.textContent = '✅ Connected!';
+            resultSpan.style.color = 'green';
+          } else {
+            resultSpan.textContent = `❌ Error: ${response.status}`;
+            resultSpan.style.color = 'red';
+          }
+        } catch (error) {
+          resultSpan.textContent = '❌ Failed to reach host';
+          resultSpan.style.color = 'red';
+        }
+      });
+
+      // Λειτουργία του κουμπιού διαγραφής (X)
+      row.querySelector('.btn-delete-url').addEventListener('click', function() {
+        // Κρατάμε τουλάχιστον ένα πεδίο πάντα ανοιχτό
+        if (urlContainer.querySelectorAll('.url-row').length > 1) {
+          row.remove();
+        } else {
+          row.querySelector('.tvh-url-input').value = '';
+          row.querySelector('.test-result-single').textContent = '';
+        }
+      });
+
+      urlContainer.appendChild(row);
+    }
+
+    // Event listener για την προσθήκη νέου URL
+    btnAddUrl.addEventListener('click', () => createUrlRow());
+
+    // --- ΠΩΣ ΝΑ ΑΠΟΘΗΚΕΥΣΕΤΕ ΚΑΙ ΝΑ ΦΟΡΤΩΣΕΤΕ ΤΑ URLS ---
+
+    // 1. Κατά την αποθήκευση (Στο δικό σας btn-save event listener)
+    // Αντί για ένα URL, μαζεύουμε όλα τα URL σε ένα Array:
+    function getSavedUrlsArray() {
+      const inputs = urlContainer.querySelectorAll('.tvh-url-input');
+      const urls = [];
+      inputs.forEach(input => {
+        if (input.value.trim()) urls.push(input.value.trim());
+      });
+      return urls; // Αυτό το array αποθηκεύετε στο config σας (π.χ. cfg.tvheadend_urls)
+    }
+
+    // 2. Κατά τη φόρτωση της σελίδας (Στο δικό σας load/init function)
+    // Αντικαταστήστε τον τρόπο που εμφανίζονται τα δεδομένα στην εκκίνηση:
+    function loadUrlsIntoUI(urlsArray) {
+      urlContainer.innerHTML = ''; // Καθαρισμός
+      if (!urlsArray || urlsArray.length === 0) {
+        createUrlRow(''); // Αν δεν υπάρχει τίποτα αποθηκευμένο, δείξε ένα κενό πεδίο
+      } else {
+        urlsArray.forEach(url => createUrlRow(url)); // Δημιούργησε μια γραμμή για κάθε URL
+      }
+    }
+
     let channels = [];
     let cells = []; // {row, col, channel_uuid}
 
@@ -103,7 +198,21 @@
     async function loadSettings() {
       const res = await fetch('/api/settings');
       const cfg = await res.json();
-      document.getElementById('tvh-url').value = cfg.tvheadend_url || '';
+
+      console.log("Loaded settings:", cfg);
+      // document.getElementById('tvh-url').value = cfg.tvheadend_url || '';
+      // 1. Φόρτωση των URLs στο UI με έλεγχο συμβατότητας (Array ή String)
+      let urlsArray = [];
+      if (Array.isArray(cfg.tvheadend_urls)) {
+        urlsArray = cfg.tvheadend_urls;
+      } else if (cfg.tvheadend_url) {
+        // Fallback: Αν υπάρχει το παλιό μονό URL ως string, το βάζουμε σε array
+        urlsArray = [cfg.tvheadend_url];
+      }
+      
+      // Κλήση της συνάρτησης που δημιουργεί δυναμικά τα πεδία εισαγωγής
+      loadUrlsIntoUI(urlsArray);
+
       document.getElementById("tvh-username").value = cfg.tvh_username || ""; 
       document.getElementById("tvh-password").value = cfg.tvh_password || "";
       cells = cfg.cells || [];
@@ -297,69 +406,49 @@
     }
 
     document.getElementById('grid-rows').addEventListener('change', renderGrid);
-    document.getElementById('grid-cols').addEventListener('change', renderGrid);
-
-    document.getElementById('btn-test').addEventListener('click', async () => {
-      const url = document.getElementById('tvh-url').value;
-      const resSpan = document.getElementById('test-result');
-      resSpan.textContent = 'Testing...';
-      const res = await fetch('/api/test_connection', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-          tvheadend_url: document.getElementById("tvh-url").value,
-          tvh_username: document.getElementById("tvh-username").value,
-          tvh_password: document.getElementById("tvh-password").value
-        })
-      });
-      const j = await res.json();
-      if (j.ok) {
-        resSpan.textContent = 'OK';
-      } else {
-        resSpan.textContent = 'Error: ' + (j.error || 'unknown');
-      }
-    });
+    document.getElementById('grid-cols').addEventListener('change', renderGrid);    
 
     async function loadChannels(){
-      const url = document.getElementById('tvh-url').value;
+      // const url = document.getElementById('tvh-url').value;
+      const inputs = Array.from(document.querySelectorAll('.tvh-url-input'))
+                      .map(i => i.value.trim())
+                      .filter(v => v !== '');
+      const url = inputs.length > 0 ? inputs[0] : '';
+
       const username = document.getElementById('tvh-username').value; 
       const password = document.getElementById('tvh-password').value;
       const status = document.getElementById('channels-status');
-      console.log('url, username, password:', url, username, password);
+      console.log('Mainurl, username, password:', url, username, password);
+      if (!url) {
+        status.textContent = 'Error: Please enter at least one TVHeadend URL';
+        status.style.color = 'orange';
+        return;
+      }
+
       status.textContent = 'Loading...';
-      const res = await fetch('/api/channels', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tvheadend_url: url, tvh_username: username, tvh_password: password })
-      });
-      const j = await res.json();
-      if (j.ok) {
-        channels = j.channels;
-        status.textContent = `Loaded ${channels.length} channels`;
-        renderGrid();
-      } else {
-        status.textContent = 'Error: ' + (j.error || 'unknown');
+      try {
+        const res = await fetch('/api/channels', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tvheadend_url: url, tvh_username: username, tvh_password: password })
+        });
+        const j = await res.json();
+        if (j.ok) {
+          channels = j.channels;
+          status.textContent = `Loaded ${channels.length} channels`;
+          renderGrid();
+        } else {
+          status.textContent = 'Error: ' + (j.error || 'unknown');
+          status.style.color = 'red'
+        }
+      } catch (error) {
+        status.textContent = 'Network error fetching channels';
+        status.style.color = 'red';
       }
     }
     document.getElementById('btn-load-channels').addEventListener('click',loadChannels);
 
-    document.getElementById('btn-save').addEventListener('click', async () => {
-      const status = document.getElementById('save-status');
-      status.textContent = 'Saving...';
-      const body = {
-        tvheadend_url: document.getElementById('tvh-url').value,
-        tvh_username: document.getElementById("tvh-username").value,
-        tvh_password: document.getElementById("tvh-password").value,
-        grids: grids
-      };
-      const res = await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      const j = await res.json();
-      status.textContent = j.status === 'ok' ? 'Saved' : 'Error saving';
-    });
+    document.getElementById('btn-save').addEventListener('click', saveAllSettings);    
 
     loadSettings();
 
@@ -372,7 +461,18 @@
       const res = await fetch('/api/settings');
       const cfg = await res.json();
 
-      document.getElementById('tvh-url').value = cfg.tvheadend_url || '';
+        // 1. Διαχείριση των URLs (Υποστήριξη Array και Fallback για παλιό String)
+        let urlsArray = [];
+        if (Array.isArray(cfg.tvheadend_urls)) {
+          urlsArray = cfg.tvheadend_urls;
+        } else if (cfg.tvheadend_url) {
+          // Αν υπάρχει το παλιό μονό URL ως string, το βάζουμε μέσα σε array
+          urlsArray = [cfg.tvheadend_url];
+        }
+        
+        // Γεμίζουμε δυναμικά τα νέα πεδία εισαγωγής στο UI
+        loadUrlsIntoUI(urlsArray);
+      // document.getElementById('tvh-url').value = cfg.tvheadend_url || '';
       document.getElementById("tvh-username").value = cfg.tvh_username || ""; 
       document.getElementById("tvh-password").value = cfg.tvh_password || "";
 
@@ -517,23 +617,32 @@
     async function saveAllSettings() {
       const status = document.getElementById('save-status');
       status.textContent = 'Saving...';
+
+      const urlsArray = getSavedUrlsArray();
+
       const body = {
-        tvheadend_url: document.getElementById('tvh-url').value,
+        // tvheadend_url: document.getElementById('tvh-url').value,
+        tvheadend_urls: urlsArray,
+        tvheadend_url: urlsArray.length > 0 ? urlsArray[0] : '',
         tvh_username: document.getElementById("tvh-username").value,
         tvh_password: document.getElementById("tvh-password").value,
         grids: grids
       };
 
-      const res = await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      const j = await res.json();
-      if (j.status === 'ok') {
-        status.textContent = 'Saved';
-      } else {
-        status.textContent = 'Error saving';
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const j = await res.json();
+        if (j.status === 'ok') {
+          status.textContent = 'Saved';
+        } else {
+          status.textContent = 'Error saving';
+        }
+      } catch (error) {
+        status.textContent = 'Network error saving';
       }
     }
 
