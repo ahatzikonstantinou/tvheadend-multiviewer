@@ -13,6 +13,9 @@ ExecStart=/opt/tv-mosaic/venv/bin/python3 /opt/tv-mosaic/app.py
 Restart=on-failure
 RestartSec=3
 
+#Ensures subprocesses like go2rtc also stop when the service crashes
+KillMode=control-group
+
 # Environment variables (optional)
 Environment=PYTHONUNBUFFERED=1
 

@@ -43,6 +43,8 @@ SOURCE_FOLDERS=(
 SOURCE_FILES=(
     "app.py"
     "tv-mosaic.service"
+    "webcam_manager.py"
+    "go2rtc_linux_arm64"
 )
 
 # Copy files to Raspberry Pi using rsync

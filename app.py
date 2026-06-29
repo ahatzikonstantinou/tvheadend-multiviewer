@@ -11,8 +11,12 @@ import threading
 import hashlib
 import time
 from pathlib import Path
+from webcam_manager import Go2RtcManager
+import socket
 
 app = Flask(__name__)
+
+rtc_manager = Go2RtcManager()
 
 CONFIG_FILE = "config.json"
 
@@ -41,13 +45,16 @@ def save_config(cfg):
 def index():
     return send_from_directory("static", "index.html")
 
+
 @app.route("/grid")
 def grid_page():
     return send_from_directory("static", "grid.html")
 
+
 @app.route("/grid2")
 def grid2_page():
     return send_from_directory("static", "grid2.html")
+
 
 @app.route("/api/settings", methods=["GET"])
 def api_get_settings():
@@ -58,7 +65,18 @@ import uuid
 
 @app.route("/api/settings", methods=["POST"])
 def api_save_settings():
+    global rtc_manager
+
     data = request.json
+
+    cfg = load_config()
+    if cfg.get("go2rtc_path") != data.get("go2rtc_path"):
+        cfg["go2rtc_path"] = data.get("go2rtc_path")
+        rtc_manager = Go2RtcManager(binary_name=cfg["go2rtc_path"])
+
+    initial_cameras = load_cameras_from_config()
+    if initial_cameras:
+        rtc_manager.start(initial_cameras, go2rtc_url=cfg.get("go2rtc_url", "http://localhost:1984/api/webrtc"))
 
     for grid in data.get("grids", []):
         if "uuid" not in grid or not grid["uuid"]:
@@ -66,6 +84,7 @@ def api_save_settings():
 
     with open("config.json", "w") as f:
         json.dump(data, f, indent=2)
+
 
     return {"status": "ok"}
 
@@ -79,24 +98,95 @@ def api_test_rtsp():
         return jsonify({"ok": False, "error": "No URL"}), 400
     
     try:
-        # Use ffprobe to test if stream is accessible
-        result = subprocess.run(
-            ['ffprobe', '-v', 'error', '-select_streams', 'v:0', 
-             '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', 
-             rtsp_url],
-            timeout=5,
-            capture_output=True
-        )
+        cfg = load_config()
+        go2rtc_url = cfg.get("go2rtc_url", "http://localhost:1984/api/webrtc")
         
-        if result.returncode == 0:
-            return jsonify({"ok": True})
-        else:
-            return jsonify({"ok": False, "error": "Stream not accessible"}), 200
-    
-    except subprocess.TimeoutExpired:
-        return jsonify({"ok": False, "error": "Connection timeout"}), 200
+        # Καθαρισμός του URL για τη χρήση του API
+        if go2rtc_url.endswith("/webrtc"):
+            go2rtc_url = go2rtc_url[:-7]
+        elif go2rtc_url.endswith("/webrtc/"):
+            go2rtc_url = go2rtc_url[:-8]
+                                
+        # 1. Βασικό Network Validation (TCP Check)
+        parsed = urlparse(rtsp_url)
+        if parsed.scheme.lower() not in ["rtsp", "rtsps"]:
+            return jsonify({"ok": False, "error": "Invalid protocol. Must be RTSP"}), 400
+            
+        hostname = parsed.hostname
+        port = parsed.port if parsed.port is not None else 554
+        
+        print(f"[RTSP Test] Checking connectivity to {hostname}:{port}...")
+        with socket.create_connection((hostname, port), timeout=2.0):
+            pass
+        print(f"[RTSP Test] Successfully connected to {hostname}:{port}")
+
+        # 2. Λήψη των υπαρχόντων streams από το go2rtc
+        status_response = requests.get(f"{go2rtc_url}/streams", timeout=2.0)
+        if status_response.status_code != 200:
+            return jsonify({"ok": False, "error": "Could not connect to go2rtc API"}), 503
+            
+        current_streams = status_response.json()
+
+        # 3. Έλεγχος αν το RTSP URL υπάρχει ήδη καταχωρημένο σε κάποιο stream
+        for stream_name, stream_info in current_streams.items():
+            # Το go2rtc αποθηκεύει το URL στους producers
+            producers = stream_info.get("producers", [])
+            for producer in producers:
+                if producer.get("url") == rtsp_url:
+                    return jsonify({
+                        "ok": True,
+                        "message": f"Camera already exists and is active under the name: '{stream_name}'",
+                        "details": {
+                            "stream_name": stream_name,
+                            "producers_count": len(producers)
+                        }
+                    }), 200
+
+        # 4. Αν ΔΕΝ υπάρχει, δημιουργούμε ένα εγγυημένα ΜΟΝΑΔΙΚΟ όνομα (UUID) για το τεστ
+        unique_id = str(uuid.uuid4())[:8]
+        temp_stream_name = f"test_cam_{unique_id}"
+        
+        # Προσθήκη του stream δυναμικά στο go2rtc μέσω PUT
+        add_stream_url = f"{go2rtc_url}/streams?src={temp_stream_name}&dst={rtsp_url}"
+        add_response = requests.put(add_stream_url, timeout=3.0)
+        
+        if add_response.status_code != 200:
+            return jsonify({"ok": False, "error": "Failed to register stream in go2rtc"}), 502
+
+        # Αναμονή για να προλάβει το go2rtc να συνδεθεί
+        time.sleep(1.5)
+
+        # Έλεγχος της κατάστασης του νέου, μοναδικού stream
+        check_response = requests.get(f"{go2rtc_url}/streams", timeout=2.0)
+        
+        # Καθαρισμός του προσωρινού stream αμέσως μετά τον έλεγχο
+        requests.delete(f"{go2rtc_url}/streams?src={temp_stream_name}", timeout=2.0)
+
+        if check_response.status_code == 200:
+            latest_streams = check_response.json()
+            cam_info = latest_streams.get(temp_stream_name, {})
+            producers = cam_info.get("producers", [])
+            
+            if producers:
+                return jsonify({
+                    "ok": True,
+                    "message": "Stream verification successful!",
+                    "details": {"producers_count": len(producers)}
+                }), 200
+            else:
+                return jsonify({
+                    "ok": False,
+                    "error": "Authentication failed or invalid RTSP path. Camera rejected go2rtc."
+                }), 401
+
+        return jsonify({"ok": False, "error": "Could not verify stream status"}), 500
+
+    except socket.error:
+        return jsonify({"ok": False, "error": "Camera is offline or RTSP port is closed."}), 502
+    except requests.exceptions.RequestException as e:
+        return jsonify({"ok": False, "error": "go2rtc API is unreachable", "details": str(e)}), 503
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 200
+        return jsonify({"ok": False, "error": "Internal error", "details": str(e)}), 500
 
 
 @app.route("/api/channels", methods=["POST"])
@@ -129,40 +219,7 @@ def api_channels():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 200
     
-@app.route("/api/audioinfo", methods=["POST"])
-def api_audioinfo():
-    data = request.get_json(force=True)
-    tvh_url = data.get("tvheadend_url")
-
-    if not tvh_url:
-        return jsonify({"ok": False, "error": "No URL"}), 400
-
-    try:
-        url = tvh_url.rstrip("/") + "/api/stream/list"
-        r = requests.get(url, timeout=5)
-        r.raise_for_status()
-
-        j = r.json()
-        entries = j.get("entries", [])
-
-        # Map: channel_uuid → audio codec
-        audio_map = {}
-
-        for e in entries:
-            if e.get("type") != "Audio":
-                continue
-
-            codec = e.get("codec")
-            channel_uuid = e.get("channel_uuid")
-
-            if channel_uuid and codec:
-                audio_map[channel_uuid] = codec.lower()
-
-        return jsonify({"ok": True, "audio": audio_map})
-
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)})
-
+ 
 @app.route("/api/epg/all")
 def get_all_epg():
     cfg = load_config()    
@@ -232,13 +289,6 @@ def tvh_proxy(channel_uuid):
         status=req.status_code
     )        
 
-# --- HLS stream manager for RTSP -> HLS conversion (requires ffmpeg) ---
-HLS_ROOT = Path(tempfile.gettempdir()) / 'tvmosaic_hls'
-HLS_ROOT.mkdir(parents=True, exist_ok=True)
-
-# Map stream_id -> { 'url': rtsp_url, 'proc': Popen, 'dir': Path }
-hls_streams = {}
-hls_lock = threading.Lock()
 
 # --- MP4 stream manager for RTSP -> progressive MP4 output ---
 MP4_ROOT = Path(tempfile.gettempdir()) / 'tvmosaic_mp4'
@@ -257,9 +307,21 @@ grid_lock = threading.Lock()
 CELL_WIDTH = 320
 CELL_HEIGHT = 180
 
+
 def _stream_id_for_url(url: str) -> str:
     h = hashlib.sha1(url.encode('utf-8')).hexdigest()
     return h
+
+'''
+# --- HLS stream manager for RTSP -> HLS conversion (requires ffmpeg) ---
+HLS_ROOT = Path(tempfile.gettempdir()) / 'tvmosaic_hls'
+HLS_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+# Map stream_id -> { 'url': rtsp_url, 'proc': Popen, 'dir': Path }
+hls_streams = {}
+hls_lock = threading.Lock()
+
 
 def start_hls_for_url(rtsp_url: str):
     sid = _stream_id_for_url(rtsp_url)
@@ -371,7 +433,7 @@ def stop_hls_for_id(sid: str):
             pass
         hls_streams.pop(sid, None)
     return True
-
+'''
 
 def build_tvh_input_url(cfg, channel_uuid: str):
     base = (cfg.get('tvheadend_url') or '').rstrip('/')
@@ -389,80 +451,6 @@ def build_tvh_input_url(cfg, channel_uuid: str):
         parsed = parsed._replace(netloc=auth_netloc)
         url = urlunparse(parsed)
     return url
-
-
-def start_mp4_for_url(rtsp_url: str):
-    sid = _stream_id_for_url(rtsp_url)
-    d = MP4_ROOT / sid
-    d.mkdir(parents=True, exist_ok=True)
-
-    with mp4_lock:
-        info = mp4_streams.get(sid)
-        if info and info.get('proc') and info['proc'].poll() is None:
-            info['last_used'] = time.time()
-            return sid
-
-        for f in d.glob('*'):
-            try:
-                f.unlink()
-            except Exception:
-                pass
-
-        cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'info', '-fflags', '+genpts']
-        if rtsp_url.startswith('rtsp://'):
-            cmd += ['-rtsp_transport', 'tcp', '-i', rtsp_url]
-        else:
-            cmd += ['-i', rtsp_url]
-
-        cmd += [
-            '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency',
-            '-r', '25', '-g', '50', '-keyint_min', '50', '-b:v', '1200k',
-            '-c:a', 'aac', '-b:a', '96k',
-            '-f', 'mp4',
-            '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-            '-y', str(d / 'stream.mp4')
-        ]
-
-        log_path = d / 'ffmpeg.log'
-        logfh = open(log_path, 'ab')
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=logfh)
-
-        for _ in range(20):
-            if (d / 'stream.mp4').exists() and (d / 'stream.mp4').stat().st_size > 1024:
-                break
-            time.sleep(0.5)
-
-        mp4_streams[sid] = {
-            'url': rtsp_url,
-            'proc': proc,
-            'dir': d,
-            'log': str(log_path),
-            'logfh': logfh,
-            'last_used': time.time()
-        }
-
-        def _watch():
-            while True:
-                ret = proc.poll()
-                if ret is None:
-                    time.sleep(1)
-                    continue
-                with mp4_lock:
-                    entry = mp4_streams.get(sid)
-                    if entry and entry.get('proc') is proc:
-                        try:
-                            lf = entry.get('logfh')
-                            if lf:
-                                lf.close()
-                        except Exception:
-                            pass
-                        mp4_streams.pop(sid, None)
-                break
-
-        t = threading.Thread(target=_watch, daemon=True)
-        t.start()
-
-        return sid
 
 
 def start_grid_for_uuid(grid_uuid: str):
@@ -618,6 +606,82 @@ def start_grid_for_uuid(grid_uuid: str):
         return sid
 
 
+'''
+def start_mp4_for_url(rtsp_url: str):
+    sid = _stream_id_for_url(rtsp_url)
+    d = MP4_ROOT / sid
+    d.mkdir(parents=True, exist_ok=True)
+
+    with mp4_lock:
+        info = mp4_streams.get(sid)
+        if info and info.get('proc') and info['proc'].poll() is None:
+            info['last_used'] = time.time()
+            return sid
+
+        for f in d.glob('*'):
+            try:
+                f.unlink()
+            except Exception:
+                pass
+
+        cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'info', '-fflags', '+genpts']
+        if rtsp_url.startswith('rtsp://'):
+            cmd += ['-rtsp_transport', 'tcp', '-i', rtsp_url]
+        else:
+            cmd += ['-i', rtsp_url]
+
+        cmd += [
+            '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency',
+            '-r', '25', '-g', '50', '-keyint_min', '50', '-b:v', '1200k',
+            '-c:a', 'aac', '-b:a', '96k',
+            '-f', 'mp4',
+            '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+            '-y', str(d / 'stream.mp4')
+        ]
+
+        log_path = d / 'ffmpeg.log'
+        logfh = open(log_path, 'ab')
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=logfh)
+
+        for _ in range(20):
+            if (d / 'stream.mp4').exists() and (d / 'stream.mp4').stat().st_size > 1024:
+                break
+            time.sleep(0.5)
+
+        mp4_streams[sid] = {
+            'url': rtsp_url,
+            'proc': proc,
+            'dir': d,
+            'log': str(log_path),
+            'logfh': logfh,
+            'last_used': time.time()
+        }
+
+        def _watch():
+            while True:
+                ret = proc.poll()
+                if ret is None:
+                    time.sleep(1)
+                    continue
+                with mp4_lock:
+                    entry = mp4_streams.get(sid)
+                    if entry and entry.get('proc') is proc:
+                        try:
+                            lf = entry.get('logfh')
+                            if lf:
+                                lf.close()
+                        except Exception:
+                            pass
+                        mp4_streams.pop(sid, None)
+                break
+
+        t = threading.Thread(target=_watch, daemon=True)
+        t.start()
+
+        return sid
+
+
+#used in grid2.html
 @app.route('/stream/mp4/start', methods=['POST'])
 def api_start_mp4():
     data = request.get_json(force=True)
@@ -637,6 +701,7 @@ def api_start_mp4():
     return jsonify({'ok': True, 'stream_id': sid, 'stream_url': stream_url})
 
 
+#used in grid2.html
 @app.route('/stream/mp4/<sid>/stream.mp4')
 def serve_mp4(sid):
     d = MP4_ROOT / sid
@@ -664,8 +729,10 @@ def serve_mp4(sid):
     resp = Response(stream_with_context(generate()), mimetype='video/mp4')
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return resp
+'''
 
 
+#used in grid3.html
 @app.route('/stream/grid/<grid_uuid>/stream.mp4')
 def serve_grid_stream(grid_uuid):
     try:
@@ -718,7 +785,7 @@ def serve_grid_stream(grid_uuid):
 def grid3_page():
     return send_from_directory('static', 'grid3.html')
 
-
+'''
 @app.route('/stream/hls/<sid>/<path:filename>')
 def serve_hls(sid, filename):
     d = HLS_ROOT / sid
@@ -743,8 +810,130 @@ def hls_status(sid):
     has_playlist = playlist.exists() and playlist.stat().st_size > 0
     has_segments = any(d.glob('*.m4s')) or (d / 'init.mp4').exists()
     return jsonify({'ok': True, 'sid': sid, 'has_playlist': has_playlist, 'has_segments': has_segments})
+'''
 
+
+# RTC code
+#
+
+def load_cameras_from_config():
+    cameras = {}
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            config_data = json.load(f)
+            
+        grids = config_data.get("grids", [])
+        camera_index = 1
+        
+        for grid in grids:            
+            cells = grid.get("cells", [])
+            for cell in cells:
+                if cell.get("source_type") == "rtsp":
+                    raw_url = cell.get("rtsp_url", "")
+                    
+                    # Καθαρισμός του URL από το "Video url - " αν υπάρχει
+                    if "rtsp://" in raw_url:
+                        clean_url = "rtsp://" + raw_url.split("rtsp://")[1]
+                        
+                        # Build go2rtc stream list
+                        # stream_list = [clean_url]
+                        stream_list = [f"ffmpeg:{clean_url}#video=copy#audio=opus"]
+
+                        # if "live0" in clean_url:  # heuristic for AAC cameras
+                        #     stream_list.append("ffmpeg:audio=opus")
+                        
+                        # Δημιουργία ID κάμερας (π.χ. camera1, camera2...)
+                        cam_id = f"camera{camera_index}"
+                        cameras[cam_id] = stream_list
+                        camera_index += 1
+                        
+    except (FileNotFoundError, json.JSONDecodeError, IndexError) as e:
+        print(f"Σφάλμα κατά την επεξεργασία του αρχείου ρυθμίσεων: {e}")
+        
+    return cameras
+    
+
+@app.route('/api/stream/<camera_id>', methods=['POST'])
+def stream_signaling(camera_id):
+    """Μεσολαβεί για την ανταλλαγή WebRTC SDP μεταξύ frontend και go2rtc"""
+    go2rtc_url = None
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            config_data = json.load(f)
+        go2rtc_url = config_data.get("go2rtc_url", "http://192.168.3.104:1984/api/webrtc")
+    except (FileNotFoundError, json.JSONDecodeError, IndexError) as e:
+        print(f"Σφάλμα κατά την επεξεργασία του αρχείου ρυθμίσεων: {e}")
+        
+    if not go2rtc_url:
+        return jsonify({"error": "Η διεύθυνση go2rtc δεν έχει ρυθμιστεί"}), 500
+    
+    if camera_id == "test_connection":
+        try:
+            test_url = request.args.get('go2rtc_url')
+            print(f"Δοκιμή σύνδεσης στο go2rtc API: {test_url}")
+            test_url = f"{urlparse(test_url).scheme}://{urlparse(test_url).netloc}/api"
+            print(f"Δοκιμή σύνδεσης στο go2rtc API: {test_url}")
+            requests.get(test_url, timeout=2)
+            return jsonify({"status": "connected"}), 200
+        except Exception:
+            return jsonify({"error": "go2rtc binary is not running"}), 500
+
+    # Ασφαλής έλεγχος ύπαρξης κάμερας
+    cameras = load_cameras_from_config()
+    
+    # Μετατροπή σε λίστα κλειδιών αν το cameras είναι dictionary, για να δουλεύει ομοιόμορφα το 'in'
+    camera_keys = cameras.keys() if isinstance(cameras, dict) else cameras
+    
+    if camera_id not in camera_keys:
+        return jsonify({"error": f"Η κάμερα '{camera_id}' δεν βρέθηκε στις ρυθμίσεις"}), 404
+        
+    frontend_sdp = request.data
+    
+    try:
+        # Αποστολή του Offer στο go2rtc
+        response = requests.post(
+            f"{go2rtc_url}?src={camera_id}",
+            data=frontend_sdp,
+            headers={'Content-Type': 'text/plain'},
+            timeout=5
+        )
+        
+        print(f"Response: {response.text}")
+        if response.status_code != 200:
+            print(f"Το go2rtc επέστρεψε σφάλμα {response.status_code}: {response.text}")
+            return jsonify({"error": f"go2rtc error: {response.text}"}), response.status_code
+
+        print(f"Επιτυχές Signaling Handshake για την κάμερα: {camera_id}")
+
+        # Επιστροφή του SDP Answer ως καθαρό Response με text/plain
+        return Response(
+            response.content, # Επιστροφή ως bytes για διατήρηση του \r\n
+            status=response.status_code, 
+            mimetype='text/plain'
+        )
+        
+    except requests.exceptions.ConnectionError:
+        # Επιστρέφει ένα καθαρό σφάλμα 502 αντί για crash 500
+        return jsonify({"error": "go2rtc does not answer.", "code": "GO2RTC_OFFLINE"}), 502
+    except requests.exceptions.RequestException as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Failed to contact go2rtc: {str(e)}"}), 500
+
+
+#
+#end of RTC code
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=7070, debug=True)
+    cfg = load_config()
+    initial_cameras = load_cameras_from_config()
+    if initial_cameras:
+        rtc_manager = Go2RtcManager(binary_name=cfg.get("go2rtc_path", "go2rtc_linux_arm64"))
+        rtc_manager.start(
+            initial_cameras, 
+            go2rtc_url=cfg.get("go2rtc_url", "http://localhost:1984/api/webrtc"))
+    else:
+        print("ΠΡΟΕΙΔΟΠΟΙΗΣΗ: Δεν βρέθηκαν κάμερες για να ξεκινήσει το go2rtc.")
+
+    app.run(host="0.0.0.0", port=7070, use_reloader=False, debug=True)
 

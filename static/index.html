@@ -22,7 +22,7 @@
     <button type="button" id="btn-add-url" style="margin-bottom: 15px;">+ Add URL</button>
 
     <br>
-
+    
     <label>
       Username:
       <input type="text" id="tvh-username" size="20" placeholder="admin">
@@ -41,6 +41,23 @@
     <span id="channels-status"></span>
 
     <br>
+
+    <strong>Flask / go2rtc Backend</strong>
+    <div>
+      <label>go2rtc relative full path (e.g. go2rtc_linux_arm64)
+        <input type="text" id="go2rtc-path" size="40" placeholder="go2rtc_linux_arm64">
+      </label>
+    </div>
+    <div>
+      <label>Url:
+        <input type="text" id="go2rtc-url" size="40" placeholder="http://192.168.3.104:1984/api/webrtc">
+      </label>
+      <button id="btn-test-go2rtc">Test go2rtc</button>
+    </div>    
+    <span id="go2rtc-status" style="margin-left: 10px; font-weight: bold;"></span>
+
+    <br>
+
     <button id="btn-save">Save settings</button>
     <span id="save-status"></span>
   </div>
@@ -88,6 +105,42 @@
   <hr>
 
   <script>
+      document.getElementById('btn-test-go2rtc').addEventListener('click', async () => {
+          const baseUrl = document.getElementById('go2rtc-url').value.trim();
+          const statusSpan = document.getElementById('go2rtc-status');
+          
+          if (!baseUrl) {
+              statusSpan.textContent = "❌ Παρακαλώ εισάγετε URL";
+              statusSpan.style.color = "red";
+              return;
+          }
+
+          statusSpan.textContent = "⏳ Έλεγχος σύνδεσης...";
+          statusSpan.style.color = "orange";
+
+          try {
+              // Στέλνουμε ένα POST αίτημα στο test endpoint της Flask
+              const response = await fetch(`/api/stream/test_connection?go2rtc_url=${encodeURIComponent(baseUrl)}`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'text/plain' },
+                  body: 'ping'
+              });
+
+              if (response.ok) {
+                  statusSpan.textContent = "✅ Επιτυχής σύνδεση με Flask & go2rtc!";
+                  statusSpan.style.color = "green";
+              } else {
+                  const errorData = await response.json().catch(() => ({}));
+                  statusSpan.textContent = `❌ Σφάλμα: ${errorData.error || "Το go2rtc δεν εκτελείται"}`;
+                  statusSpan.style.color = "red";
+              }
+          } catch (error) {
+              console.error("go2rtc Test Error:", error);
+              statusSpan.textContent = "❌ Αποτυχία σύνδεσης (Το Flask Backend είναι κλειστό)";
+              statusSpan.style.color = "red";
+          }
+      });
+      
     // Αρχικοποίηση των στοιχείων του DOM
     const urlContainer = document.getElementById('url-container');
     const btnAddUrl = document.getElementById('btn-add-url');
@@ -195,31 +248,7 @@
       window.location.href = "/grid2";
     });
 
-    async function loadSettings() {
-      const res = await fetch('/api/settings');
-      const cfg = await res.json();
-
-      console.log("Loaded settings:", cfg);
-      // document.getElementById('tvh-url').value = cfg.tvheadend_url || '';
-      // 1. Φόρτωση των URLs στο UI με έλεγχο συμβατότητας (Array ή String)
-      let urlsArray = [];
-      if (Array.isArray(cfg.tvheadend_urls)) {
-        urlsArray = cfg.tvheadend_urls;
-      } else if (cfg.tvheadend_url) {
-        // Fallback: Αν υπάρχει το παλιό μονό URL ως string, το βάζουμε σε array
-        urlsArray = [cfg.tvheadend_url];
-      }
-      
-      // Κλήση της συνάρτησης που δημιουργεί δυναμικά τα πεδία εισαγωγής
-      loadUrlsIntoUI(urlsArray);
-
-      document.getElementById("tvh-username").value = cfg.tvh_username || ""; 
-      document.getElementById("tvh-password").value = cfg.tvh_password || "";
-      cells = cfg.cells || [];
-      
-      renderGrid();
-    }
-
+    
     function renderGrid() {
       const rows = parseInt(document.getElementById('grid-rows').value, 10);
       const cols = parseInt(document.getElementById('grid-cols').value, 10);
@@ -450,7 +479,7 @@
 
     document.getElementById('btn-save').addEventListener('click', saveAllSettings);    
 
-    loadSettings();
+    // loadSettings();
 
     let grids = [];   // full grid objects
 
@@ -461,18 +490,24 @@
       const res = await fetch('/api/settings');
       const cfg = await res.json();
 
-        // 1. Διαχείριση των URLs (Υποστήριξη Array και Fallback για παλιό String)
-        let urlsArray = [];
-        if (Array.isArray(cfg.tvheadend_urls)) {
-          urlsArray = cfg.tvheadend_urls;
-        } else if (cfg.tvheadend_url) {
-          // Αν υπάρχει το παλιό μονό URL ως string, το βάζουμε μέσα σε array
-          urlsArray = [cfg.tvheadend_url];
-        }
-        
-        // Γεμίζουμε δυναμικά τα νέα πεδία εισαγωγής στο UI
-        loadUrlsIntoUI(urlsArray);
+      console.log("cfg:", cfg);
+
+      // 1. Διαχείριση των URLs (Υποστήριξη Array και Fallback για παλιό String)
+      let urlsArray = [];
+      if (Array.isArray(cfg.tvheadend_urls)) {
+        urlsArray = cfg.tvheadend_urls;
+      } else if (cfg.tvheadend_url) {
+        // Αν υπάρχει το παλιό μονό URL ως string, το βάζουμε μέσα σε array
+        urlsArray = [cfg.tvheadend_url];
+      }
+      
+      // Γεμίζουμε δυναμικά τα νέα πεδία εισαγωγής στο UI
+      loadUrlsIntoUI(urlsArray);
+
       // document.getElementById('tvh-url').value = cfg.tvheadend_url || '';
+      document.getElementById("go2rtc-path").value = cfg.go2rtc_path || "";
+      document.getElementById("go2rtc-url").value = cfg.go2rtc_url || "";
+
       document.getElementById("tvh-username").value = cfg.tvh_username || ""; 
       document.getElementById("tvh-password").value = cfg.tvh_password || "";
 
@@ -624,8 +659,10 @@
         // tvheadend_url: document.getElementById('tvh-url').value,
         tvheadend_urls: urlsArray,
         tvheadend_url: urlsArray.length > 0 ? urlsArray[0] : '',
-        tvh_username: document.getElementById("tvh-username").value,
-        tvh_password: document.getElementById("tvh-password").value,
+        tvh_username: document.getElementById("tvh-username").value.trim(),
+        tvh_password: document.getElementById("tvh-password").value.trim(),
+        go2rtc_path: document.getElementById('go2rtc-path').value.trim(),
+        go2rtc_url: document.getElementById('go2rtc-url').value.trim(),
         grids: grids
       };
 

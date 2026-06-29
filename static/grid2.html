@@ -112,7 +112,7 @@
     }
 
     let streamCounter = 0;
-    function buildStreamURL(tvhUrl, channel) {      
+    function buildTvHeadendStreamURL(tvhUrl, channel) {      
       // return '/tvh_proxy/' + channel.uuid; // tvh_proxy causes a lot of freeze ups to all streams
       
       streamCounter++;
@@ -133,6 +133,79 @@
         // for access without login, create a user in tvheadend with username "*", put hime first
         // in the list of users, and do NOT give hime a  password.
     }
+
+    async function buildWebRtcStream(cameraId) {
+      // 1. Δημιουργία τοπικού WebRTC Peer Connection
+      const parsedUrl = new URL(cfg.go2rtc_url);
+      const pc = new RTCPeerConnection({
+          iceServers: [{ urls: `stun:${parsedUrl.host}` }]
+      });
+
+      const remoteStream = new MediaStream();
+
+      // 2. Υποσχόμαστε ότι θα επιστρέψουμε το MediaStream μόλις έρθει το track από το go2rtc
+      const streamPromise = new Promise((resolve, reject) => {
+        let hasVideo = false;
+        let hasAudio = false;
+        pc.ontrack = (event) => {
+            // // Μόλις το go2rtc μας στείλει το βίντεο, επιστρέφουμε το stream
+            // if (event.streams && event.streams[0]) {
+            //     resolve(event.streams[0]);
+            // }
+            
+            // Προσθέτουμε κάθε track (βίντεο ή ήχο) στο remoteStream
+            console.log(`[WebRTC ${cameraId}] Έφτασε track:`, event.track.kind);
+            if (event.track) {
+                remoteStream.addTrack(event.track);
+                if (event.track.kind === 'video') hasVideo = true;
+                if (event.track.kind === 'audio') hasAudio = true;
+            }
+            
+            // Μόλις βρούμε το video track, κάνουμε resolve (ο ήχος θα ακολουθήσει στο ίδιο stream)
+            if (hasVideo) {
+                resolve(remoteStream);
+            }
+        };
+          
+          // Timeout σε περίπτωση που η κάμερα είναι offline για να μην κολλήσει το UI
+          setTimeout(() => reject(new Error(`Timeout loading stream for ${cameraId}`)), 10000);
+      });
+
+      // 3. Δηλώνουμε ότι θέλουμε να λάβουμε μόνο (recvonly)
+      pc.addTransceiver('video', { direction: 'recvonly' });
+      pc.addTransceiver('audio', { direction: 'recvonly' });
+      
+      // 4. Δημιουργία τοπικού SDP Offer
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      try {
+          // 5. Αποστολή του Offer στο Flask Backend (το οποίο μεσολαβεί στο go2rtc)
+          const response = await fetch(`/api/stream/${cameraId}`, {
+              method: 'POST',
+              body: pc.localDescription.sdp,
+              headers: { 'Content-Type': 'text/plain' }
+          });
+
+          if (!response.ok) throw new Error('Signaling handshake failed');
+          
+          const answerSdp = await response.text();
+          
+          // 6. Ορισμός της απάντησης (Answer) που πήραμε πίσω
+          await pc.setRemoteDescription(new RTCSessionDescription({
+              type: 'answer',
+              sdp: answerSdp
+          }));
+
+          // Επιστρέφουμε το Promise που θα γίνει resolve στο βήμα 2
+          return streamPromise;
+
+      } catch (error) {
+          pc.close();
+          throw error;
+      }
+    }
+
 
     function restartVideo(video, streamUrl) {
       video.pause();
@@ -365,7 +438,8 @@
 
     }
 
-    function createCell(channel, streamUrl, index, sourceType = 'tvheadend') {
+    let cameraIndex = 1;
+    async function createCell(channel, streamUrl, index, sourceType = 'tvheadend') {
       const cellDiv = document.createElement('div');
       cellDiv.className = 'cell';
 
@@ -381,27 +455,23 @@
       video.autoplay = true;
       video.muted = true;          // start muted
       video.playsInline = true;
+      video.controls = false;
+      video.preload="auto";
 
       if (sourceType === 'rtsp' && typeof streamUrl === 'string' && streamUrl.startsWith('rtsp://')) {
-        // Start server-side progressive MP4 stream and use returned file URL
-        (async () => {
-          try {
-            const res = await fetch('/stream/mp4/start', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ rtsp_url: streamUrl })
-            });
-            const j = await res.json();
-            if (j.ok && j.stream_url) {
-              setVideoSource(video, j.stream_url);
-              attachStreamMonitor(video, j.stream_url, cellDiv);
-            } else {
-              cellDiv.classList.add('video-stalled');
-            }
-          } catch (e) {
-            cellDiv.classList.add('video-stalled');
-          }
-        })();
+        const cameraId = `camera${cameraIndex ++}`; 
+        
+        try {
+            // Κλήση της νέας μεθόδου
+            const mediaStream = await buildWebRtcStream(cameraId);
+            
+            // Τα WebRTC streams ΜΠΑΙΝΟΥΝ ΠΑΝΤΑ στο .srcObject και ΟΧΙ στο .src
+            video.srcObject = mediaStream; 
+            
+        } catch (error) {
+            console.error(`Αποτυχία φόρτωσης webcam grid cell:`, error);
+            // Εδώ μπορείς να βάλεις ένα placeholder image ή κείμενο "Camera Offline"
+        }
       } else {
         video.src = streamUrl;
         attachStreamMonitor(video, streamUrl, cellDiv);
@@ -571,8 +641,8 @@
             if (sourceType === 'tvheadend' && cellCfg.channel_uuid) {
               const ch = findChannel(channels, cellCfg.channel_uuid);
               if (ch) {
-                const streamUrl = buildStreamURL(urlsSource, ch);
-                const cell = createCell(ch, streamUrl, index, sourceType);
+                const streamUrl = buildTvHeadendStreamURL(urlsSource, ch);
+                const cell = await createCell(ch, streamUrl, index, sourceType);
                 container.appendChild(cell);
               } else {
                 const emptyCell = document.createElement('div');
@@ -583,7 +653,7 @@
             } else if (sourceType === 'rtsp' && cellCfg.rtsp_url) {
               const rtspUrl = cellCfg.rtsp_url;
               const rtspLabel = cellCfg.rtsp_label || rtspUrl;
-              const cell = createCell(
+              const cell = await createCell(
                 { name: rtspLabel, uuid: rtspUrl },
                 rtspUrl,
                 index,

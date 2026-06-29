@@ -144,7 +144,8 @@ python serve.py
 In a browser navigate to `http://192.168.3.104:7070/`
 
 Configure:
-- TVHeadend Url
+- TVHeadend Urls
+- Go2RTC url
 - Grid
 - Channel mappiings to the grid's cells
 
@@ -183,6 +184,8 @@ This section walks you through preparing the Pi, setting up the project, and ena
 
 ## 1. Update and install dependencies
 
+Go2RTC is used to transform rtsp to a format playable in browsers, it consumes very little cpu power.
+
 ```bash
 sudo apt update
 sudo apt upgrade -y
@@ -219,6 +222,16 @@ pip install flask waitress jsonschema
 These are optional — the multiviewer itself is static and works with `http.server`.
 
 ---
+
+### 4.1 Install go2rtc
+go2rtc is used to transcode rtsp streams from webcams with minimal cpu consumption, into streams that are playable by browser
+- cd in `#tv-mosaic-folder#` and download go2rtc for your platform from https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_linux_arm6. Please verify the link at https://go2rtc.com/#Download
+- Make the downloaded file executable
+```bash
+cd /opt/tv-mosaic
+wget https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_linux_arm64
+sudo chmod +x go2rtc_linux_arm64
+```
 
 ## 5. Test the server manually
 
